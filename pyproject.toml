@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "boardgametracking"
+version = "0.1.0"
+description = ""
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+matplotlib = "^3.6.2"
+numpy = "^1.23.5"
+opencv-python = "^4.6.0.66"
+ipywidgets = "^8.0.3"
+ffmpeg-python = "^0.2.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
