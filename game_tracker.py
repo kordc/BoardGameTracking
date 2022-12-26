@@ -8,6 +8,10 @@ class CycladesTracker:
         self.equalize = "local"
         self.foreground_knn = cv2.createBackgroundSubtractorKNN()
 
+        self.MAX_FEATURES = 500
+        self.GOOD_MATCH_PERCENT = 0.15
+        self.orb = cv2.ORB_create(self.MAX_FEATURES)
+
     def find_separating_line(self, frame):
         # Find point dividing left and right part of the board
         g = np.ones((10,10))/100
@@ -23,6 +27,16 @@ class CycladesTracker:
 
         return line_x - 10
 
+    def equalize_color_image(self, frame):
+        lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+        lab_planes = np.array(cv2.split(lab))
+        clahe = cv2.createCLAHE(clipLimit=2.0,tileGridSize=(3,3))
+        lab_planes[0] = clahe.apply(lab_planes[0])
+        lab = cv2.merge(lab_planes)
+        bgr = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+
+        return bgr
+
     def separate(self, frame_c, frame_gray):
         # separates everything
         return frame_c[:,:self.intersecting_line_x], frame_gray[:,:self.intersecting_line_x],\
@@ -33,14 +47,17 @@ class CycladesTracker:
         frame = cv2.resize(frame, None,fx=0.4, fy=0.4)
         if self.blur:
             frame = cv2.GaussianBlur(frame, (3,3), 0)
+        
+        if self.equalize: # equalize color image!
+            frame = self.equalize_color_image(frame)
 
         frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        if self.equalize == "global":
-            frame_gray = cv2.equalizeHist(frame_gray)
-        elif self.equalize == "local":
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-            frame_gray = clahe.apply(frame_gray)
+        # if self.equalize == "global":
+        #     frame_gray = cv2.equalizeHist(frame_gray)
+        # elif self.equalize == "local":
+        #     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        #     frame_gray = clahe.apply(frame_gray)
 
         return frame, frame_gray
 
@@ -111,43 +128,82 @@ class CycladesTracker:
         #             cv2.rectangle(frame,(x,y),(x+w,y+h),(255,0,0),2)
         #     candidates = new_candidates
 
+    def alignImageToFirstFrame(self, im_gray, im_color):
+        
+        # Detect ORB features and compute descriptors.
+        orb = cv2.ORB_create(self.MAX_FEATURES)
+        keypoints1, descriptors1 = orb.detectAndCompute(im_gray, None)
+        
+        # Match features.
+        matcher = cv2.DescriptorMatcher_create(cv2.DESCRIPTOR_MATCHER_BRUTEFORCE_HAMMING)
+        matches = list(matcher.match(descriptors1, self.first_frame_desc, None))
+        
+        # Sort matches by score
+        matches.sort(key=lambda x: x.distance, reverse=False)
+        
+        # Remove not so good matches
+        numGoodMatches = int(len(matches) * self.GOOD_MATCH_PERCENT)
+        matches = matches[:numGoodMatches]
+        
+        # Draw top matches
+        imMatches = cv2.drawMatches(im_color, keypoints1, self.first_frame_color, self.first_frame_key, matches, None)
+        cv2.imwrite("matches.jpg", imMatches)
+        
+        # Extract location of good matches
+        points1 = np.zeros((len(matches), 2), dtype=np.float32)
+        points2 = np.zeros((len(matches), 2), dtype=np.float32)
+        
+        for i, match in enumerate(matches):
+            points1[i, :] = keypoints1[match.queryIdx].pt
+            points2[i, :] = self.first_frame_key[match.trainIdx].pt
+        
+        # Find homography
+        h, mask = cv2.findHomography(points1, points2, cv2.RANSAC)
+        
+        # Use homography
+        height, width, channels = self.first_frame_color.shape
+        im1Reg = cv2.warpPerspective(im_color, h, (width, height))
+        
+        return im1Reg
 
     def run(self, video_path):
         # At first processing of the first frame
         video, width, height, fps = utils.get_video(video_path)
 
         first_frame = utils.get_one_frame(video, frame_num=0, current_frame=0)
-        frame_color, frame_gray = self.preprocess_each_frame(first_frame)
+        self.first_frame_color, self.first_frame_gray = self.preprocess_each_frame(first_frame)
+        self.height, self.width = self.first_frame_gray.shape
 
-        self.intersecting_line_x = self.find_separating_line(frame_color)
+        self.first_frame_key, self.first_frame_desc = self.orb.detectAndCompute(self.first_frame_gray, None)
+ 
+        self.intersecting_line_x = self.find_separating_line(self.first_frame_color)
 
-
-        self.left_part_color, self.left_part_gray, self.right_part_color, self.right_part_gray = self.separate(frame_color, frame_gray)
+        self.left_part_color, self.left_part_gray, self.right_part_color, self.right_part_gray = self.separate(self.first_frame_color, self.first_frame_gray)
 
         self.map_circles = utils.find_circles(self.right_part_gray, equalize=None, minDist=30, param1=170, param2=20, minRadius=12, maxRadius=25)
         self.map_circles = self.label_circles(self.map_circles, self.right_part_color)
-
 
         current_frame = 0
 
         #than processing of later ones withouth unnecessary steps, just updates
         while video.isOpened():
-            #video.set(cv2.CAP_PROP_POS_FRAMES, current_frame*10) # 3fps 
+            video.set(cv2.CAP_PROP_POS_FRAMES, current_frame*10) # 3fps 
             ret, frame = video.read()
             
             if ret:
                 current_frame +=1
                 frame_color, frame_gray = self.preprocess_each_frame(frame)
-                
+                frame_color = self.alignImageToFirstFrame(frame_gray, frame_color) #! I don't know where exactly this should be done so that grayscale images is warped too... to be discussed
+
                 self.left_part_color, self.left_part_gray, self.right_part_color, self.right_part_gray = self.separate(frame_color,frame_gray)
 
                 foreground = self.foreground_knn.apply(cv2.GaussianBlur(frame_color, (3,3), 0))
                 foreground = cv2.morphologyEx(foreground, cv2.MORPH_OPEN, np.ones((7,7), dtype=np.uint8))
                 frame_color = self.update_interesting_objects(foreground, frame_color)
 
-                #self.right_part = self.draw_circles(self.right_part_color, self.map_circles)
+                self.right_part = self.draw_circles(self.right_part_color, self.map_circles)
                 cv2.imshow("left", self.left_part_color)
-                cv2.imshow("right", self.right_part_gray)
+                cv2.imshow("right", self.right_part_color)
                 cv2.imshow("game look", np.concatenate([self.left_part_color, self.right_part_color], axis=1))
                 cv2.imshow("foreground", foreground)
 
