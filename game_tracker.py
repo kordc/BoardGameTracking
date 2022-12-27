@@ -12,6 +12,10 @@ class CycladesTracker:
         self.GOOD_MATCH_PERCENT = 0.15
         self.orb = cv2.ORB_create(self.MAX_FEATURES)
 
+        self.objects = {'red_ships': 0, 'yellow_ships': 0, 'black_ships': 0,
+                        'red_counters': 0, 'yellow_counters': 0, 'black_counters': 0,
+                        'cards': 0}
+
     def find_separating_line(self, frame):
         # Find point dividing left and right part of the board
         g = np.ones((10,10))/100
@@ -101,32 +105,51 @@ class CycladesTracker:
 
         return frame
 
-    def update_interesting_objects(self, foreground, frame):
+    def classify_objects(self, x, y, w, h, frame):
+        yellow = utils.segment_by_hsv_color(frame[y:y+h, x:x+w], np.array([20, 100, 100]), np.array([30, 255, 255]))
+        black = utils.segment_by_hsv_color(frame[y:y+h, x:x+w], np.array([0, 0, 0]), np.array([180, 255, 30]))
+        red = utils.segment_by_hsv_color(frame[y:y+h, x:x+w], np.array([0, 100, 100]), np.array([10, 255, 255]))
+        if black.sum() > black.size * 0.8 and black.sum() > red.sum() and black.sum() > yellow.sum():
+            cv2.putText(frame, "black", (x, y),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            return True
+        if red.sum() > red.size * 0.8 and red.sum() > yellow.sum() and red.sum() > black.sum():
+            cv2.putText(frame, "red", (x, y), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            return True
+        if yellow.sum() > yellow.size * 0.8 and yellow.sum() > red.sum() and yellow.sum() > black.sum():
+            cv2.putText(frame, "yellow", (x, y), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            return True
+        return False
+    
+    def update_interesting_objects(self, foreground, frame, candidates):
         # bases on foreground it updates interesting objects
         cnts, hier = cv2.findContours(foreground, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        boxes = []
+        boxes, correct_boxes = [], []
         for cnt in cnts:
             x,y,w,h = cv2.boundingRect(cnt)
             boxes.append([x,y,w,h]) # Getting coordinates of every new found box
-            cv2.rectangle(frame,(x,y),(x+w,y+h),(0,255,0),2)
-        return frame
+            # cv2.rectangle(frame,(x,y),(x+w,y+h),(0,255,0),2)
+            # _ = self.classify_objects(x, y, w, h, frame)
+        
+        if not candidates: # if this is first iteration
+            candidates = {tuple(box): 1 for box in boxes}
+        else:
+            old = list(candidates.keys()) #previous candidates
+            new = boxes # currently found boxes
 
-        # if not candidates: # if this is first iteration
-        #     candidates = {tuple(box): 1 for box in boxes}
-        # else:
-        #     old = list(candidates.keys()) #previous candidates
-        #     new = boxes # currently found boxes
+            matches = utils.centres_within(np.array(old), np.array(new)) # which box match to whom
+            new_candidates = {tuple(box): 1 for box in boxes}
+            for match in matches: # Box ith from previous iteration matched to jth from this iteration
+                i,j = match
+                new_candidates[tuple(new[i])] = candidates[old[j]] + 1
+                if new_candidates[tuple(new[i])] == 3: # If box was seen twice in the same place we track it
+                    correct_boxes.append(new[i])
+                    x,y,w,h = new[i]
+                    cv2.rectangle(frame,(x,y),(x+w,y+h),(255,0,0),2)
+                    _ = self.classify_objects(x, y, w, h, frame)
+            candidates = new_candidates
+        return frame, candidates
 
-        #     matches = centres_within(np.array(old), np.array(new)) # which box match to whom
-        #     new_candidates = {tuple(box): 1 for box in boxes}
-        #     for match in matches: # Box ith from previous iteration matched to jth from this iteration
-        #         i,j = match
-        #         new_candidates[tuple(new[i])] = candidates[old[j]] + 1
-        #         if new_candidates[tuple(new[i])] == 3: # If box was seen twice in the same place we track it
-        #             correct_boxes.append(new[i])
-        #             x,y,w,h = new[i]
-        #             cv2.rectangle(frame,(x,y),(x+w,y+h),(255,0,0),2)
-        #     candidates = new_candidates
 
     def alignImageToFirstFrame(self, im_gray, im_color):
         
@@ -184,6 +207,7 @@ class CycladesTracker:
         self.map_circles = self.label_circles(self.map_circles, self.right_part_color)
 
         current_frame = 0
+        candidates = None
 
         #than processing of later ones withouth unnecessary steps, just updates
         while video.isOpened():
@@ -199,9 +223,11 @@ class CycladesTracker:
 
                 foreground = self.foreground_knn.apply(cv2.GaussianBlur(frame_color, (3,3), 0))
                 foreground = cv2.morphologyEx(foreground, cv2.MORPH_OPEN, np.ones((7,7), dtype=np.uint8))
-                frame_color = self.update_interesting_objects(foreground, frame_color)
+                
+                frame_color, candidates = self.update_interesting_objects(
+                    foreground, frame_color, candidates)
 
-                self.right_part = self.draw_circles(self.right_part_color, self.map_circles)
+                # self.right_part = self.draw_circles(self.right_part_color, self.map_circles)
                 cv2.imshow("left", self.left_part_color)
                 cv2.imshow("right", self.right_part_color)
                 cv2.imshow("game look", np.concatenate([self.left_part_color, self.right_part_color], axis=1))
