@@ -109,16 +109,36 @@ class CycladesTracker:
         yellow = utils.segment_by_hsv_color(frame[y:y+h, x:x+w], np.array([20, 100, 100]), np.array([30, 255, 255]))
         black = utils.segment_by_hsv_color(frame[y:y+h, x:x+w], np.array([0, 0, 0]), np.array([180, 255, 30]))
         red = utils.segment_by_hsv_color(frame[y:y+h, x:x+w], np.array([0, 100, 100]), np.array([10, 255, 255]))
+        sea_mask = utils.segment_by_hsv_color(
+            frame[y:y+h, x:x+w], np.array([50, 50, 50]), np.array([110, 255, 255]))
+        land_mask = utils.segment_by_hsv_color(
+            frame[y:y+h, x:x+w], np.array([10, 50, 50]), np.array([49, 255, 255]))
+
+        total = w * h * 255
+        sea_ratio = np.sum(sea_mask) / total
+        land_ratio = np.sum(land_mask) / total
+
+        obj_type = ""
+        # if land_ratio > 0.01:
+        #     obj_type = "land"
+        # elif sea_ratio > 0.2:
+        #     obj_type = "ship"
+        # else:
+        #     obj_type = "cardboard"
+
         if black.sum() > black.size * 0.8 and black.sum() > red.sum() and black.sum() > yellow.sum():
-            cv2.putText(frame, "black", (x, y),
+            cv2.putText(frame, "black " + obj_type, (x, y),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
             return True
         if red.sum() > red.size * 0.8 and red.sum() > yellow.sum() and red.sum() > black.sum():
-            cv2.putText(frame, "red", (x, y), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            cv2.putText(frame, "red " + obj_type, (x, y),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
             return True
         if yellow.sum() > yellow.size * 0.8 and yellow.sum() > red.sum() and yellow.sum() > black.sum():
-            cv2.putText(frame, "yellow", (x, y), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            cv2.putText(frame, "yellow " + obj_type, (x, y),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
             return True
+
         return False
     
     def update_interesting_objects(self, foreground, frame, candidates):
@@ -227,7 +247,7 @@ class CycladesTracker:
                 frame_color, candidates = self.update_interesting_objects(
                     foreground, frame_color, candidates)
 
-                # self.right_part = self.draw_circles(self.right_part_color, self.map_circles)
+                self.right_part = self.draw_circles(self.right_part_color, self.map_circles)
                 cv2.imshow("left", self.left_part_color)
                 cv2.imshow("right", self.right_part_color)
                 cv2.imshow("game look", np.concatenate([self.left_part_color, self.right_part_color], axis=1))
