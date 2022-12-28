@@ -105,6 +105,7 @@ class CycladesTracker:
     def update_interesting_objects(self, foreground, frame):
         # bases on foreground it updates interesting objects
         cnts, hier = cv2.findContours(foreground, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        #print(hier)
         boxes = []
         for cnt in cnts:
             x,y,w,h = cv2.boundingRect(cnt)
@@ -146,8 +147,8 @@ class CycladesTracker:
         matches = matches[:numGoodMatches]
         
         # Draw top matches
-        imMatches = cv2.drawMatches(im_color, keypoints1, self.first_frame_color, self.first_frame_key, matches, None)
-        cv2.imwrite("matches.jpg", imMatches)
+        #imMatches = cv2.drawMatches(im_color, keypoints1, self.first_frame_color, self.first_frame_key, matches, None)
+        #cv2.imwrite("matches.jpg", imMatches)
         
         # Extract location of good matches
         points1 = np.zeros((len(matches), 2), dtype=np.float32)
@@ -172,7 +173,7 @@ class CycladesTracker:
         if images is None: #! First every initialization
             empty_board_color, empty_board_gray = self.preprocess_each_frame(self.empty_board_image)
             empty_board_color = self.alignImageToFirstFrame(empty_board_gray, empty_board_color)
-        else: #! reinitialization
+        else: #! reinitialization, but not used
             empty_board_color, empty_board_gray = images
 
         for i in range(20):
@@ -181,10 +182,11 @@ class CycladesTracker:
         return foreground_knn
 
     def analyze_left_part(left_color, left_gray):
+        #! not used yet
         cv2.imshow("left_color", left_color)
         cv2.imshow("left_gray", left_gray)
 
-    def initialize_first_frame(self, first_frame, first_frame_gray=None):
+    def initialize_first_frame(self, first_frame):
         self.first_frame_color, self.first_frame_gray = self.preprocess_each_frame(first_frame)
         self.height, self.width = self.first_frame_gray.shape
 
@@ -199,18 +201,36 @@ class CycladesTracker:
         self.foreground_knn = self.initialize_background_subtractor()
 
     def reinitialize_first_frame(self, frame_color, frame_gray):
+        # reinitializes mask for alignment
         self.first_frame_color, self.first_frame_gray = frame_color, frame_gray
 
         self.first_frame_key, self.first_frame_desc = self.orb.detectAndCompute(self.first_frame_gray, None)
 
         #self.foreground_knn = self.initialize_background_subtractor((frame_color, frame_gray))
 
+    def get_mask_of_left_mess(self):
+        #Cut of the left background
+        empty_board_color, empty_board_gray = self.preprocess_each_frame(self.empty_board_image)
+        edges = cv2.Canny(cv2.medianBlur(empty_board_color,3), 200,250, apertureSize=3)
+        linesP = cv2.HoughLinesP(edges, 1, np.pi / 180, 100, None, 400, 20)
+        line = linesP[0][0]
+        bounding_points = np.linspace(line[2]-5, line[3]-5, empty_board_color.shape[0]).astype(np.uint8)
+
+        mask = np.ones_like(empty_board_gray)
+        for i, boundary in enumerate(bounding_points):
+            mask[i, :boundary] = 0
+        
+        self.mask = mask
+
+        #cv2.imshow("mask", mask)
+                
+
     def run(self, video_path):
         # At first processing of the first frame
         video, width, height, fps = utils.get_video(video_path)
 
         first_frame = utils.get_one_frame(video, frame_num=0, current_frame=0)
-
+        self.get_mask_of_left_mess()
         self.initialize_first_frame(first_frame)
 
         current_frame = 0
@@ -226,18 +246,18 @@ class CycladesTracker:
                 frame_color = self.alignImageToFirstFrame(frame_gray, frame_color) #! I don't know where exactly this should be done so that grayscale images is warped too... to be discussed
 
                 
-
                 self.left_part_color, self.left_part_gray, self.right_part_color, self.right_part_gray = self.separate(frame_color,frame_gray)
 
-                foreground = self.foreground_knn.apply(cv2.GaussianBlur(frame_color, (3,3), 0))
-                foreground = cv2.morphologyEx(foreground, cv2.MORPH_OPEN, np.ones((7,7), dtype=np.uint8))
+                foreground = self.foreground_knn.apply(cv2.GaussianBlur(frame_color, (7,7), 0)) #! whether or not blur is usefull is not sure
+                foreground = cv2.morphologyEx(foreground, cv2.MORPH_OPEN, np.ones((7,7), dtype=np.uint8)) * self.mask # To filter defined background we multiply by mask
+                foreground = ((foreground > 200) * 255).astype(np.uint8) # To have only very intense foreground
                 frame_color = self.update_interesting_objects(foreground, frame_color)
 
                 #! WE reupdate our first frame if we detect some problems with foreground
                 #! This actually may make things even worse if we do this in wrong moment e.g when we have hand on the screen it became background
-                # if current_frame % 300 == 0:
-                #     print("REINITIALIZE")
-                #     self.reinitialize_first_frame(frame_color, cv2.cvtColor(frame_color, cv2.COLOR_BGR2GRAY)) #! gray frame is not warped by default this should be rethought
+                if current_frame % 300 == 0:
+                    print("REINITIALIZE")
+                    self.reinitialize_first_frame(frame_color, cv2.cvtColor(frame_color, cv2.COLOR_BGR2GRAY)) #! gray frame is not warped by default this should be rethought
 
 
                 self.right_part = self.draw_circles(self.right_part_color, self.map_circles)
