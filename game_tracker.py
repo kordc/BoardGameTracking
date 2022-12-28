@@ -12,9 +12,9 @@ class CycladesTracker:
         self.GOOD_MATCH_PERCENT = 0.15
         self.orb = cv2.ORB_create(self.MAX_FEATURES)
 
-        self.objects = {'red_ships': 0, 'yellow_ships': 0, 'black_ships': 0,
-                        'red_counters': 0, 'yellow_counters': 0, 'black_counters': 0,
-                        'cards': 0}
+        self.objects = {'red_ships': [], 'yellow_ships': [], 'black_ships': [],
+                        'red_counters': [], 'yellow_counters': [], 'black_counters': [],
+                        'cards': []}
 
     def find_separating_line(self, frame):
         # Find point dividing left and right part of the board
@@ -129,14 +129,17 @@ class CycladesTracker:
         if black.sum() > black.size * 0.8 and black.sum() > red.sum() and black.sum() > yellow.sum():
             cv2.putText(frame, "black " + obj_type, (x, y),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            self.objects['black_ships'].append([x, y, w, h])
             return True
         if red.sum() > red.size * 0.8 and red.sum() > yellow.sum() and red.sum() > black.sum():
             cv2.putText(frame, "red " + obj_type, (x, y),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            self.objects['red_ships'].append([x, y, w, h])
             return True
         if yellow.sum() > yellow.size * 0.8 and yellow.sum() > red.sum() and yellow.sum() > black.sum():
             cv2.putText(frame, "yellow " + obj_type, (x, y),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            self.objects['yellow_ships'].append([x, y, w, h])
             return True
 
         return False
@@ -248,10 +251,19 @@ class CycladesTracker:
                     foreground, frame_color, candidates)
 
                 self.right_part = self.draw_circles(self.right_part_color, self.map_circles)
+                h = 0
+                self.stats = np.zeros(
+                    self.right_part_color.shape, dtype=np.uint8)
+                self.stats.fill(255)
+                for key, l in self.objects.items():
+                    cv2.putText(self.stats, key + ": " + str(len(l)), (20,
+                                20 + 20 * h), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                    h += 1
                 cv2.imshow("left", self.left_part_color)
                 cv2.imshow("right", self.right_part_color)
                 cv2.imshow("game look", np.concatenate([self.left_part_color, self.right_part_color], axis=1))
                 cv2.imshow("foreground", foreground)
+                cv2.imshow("stats", self.stats)
 
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
