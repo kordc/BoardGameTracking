@@ -3,10 +3,11 @@ import numpy as np
 import utils
 
 class CycladesTracker:
-    def __init__(self,):
+    def __init__(self, empty_board_path):
         self.blur = False
         self.equalize = "local"
-        self.foreground_knn = cv2.createBackgroundSubtractorKNN()
+        
+        self.empty_board_image = cv2.imread(empty_board_path)
 
         self.MAX_FEATURES = 500
         self.GOOD_MATCH_PERCENT = 0.15
@@ -67,7 +68,7 @@ class CycladesTracker:
         for circle in circles[0,:]:
             x,y,r = circle
             
-            x1,y1 = x - r, y - r # making square out of a circle
+            x1,y1 = x - min([x,r]), y - min([y,r]) # making square out of a circle
             x2,y2 = x + r, y + r
 
             circle[2] = 19 # Setting constant radius to the circle
@@ -129,7 +130,6 @@ class CycladesTracker:
         #     candidates = new_candidates
 
     def alignImageToFirstFrame(self, im_gray, im_color):
-        
         # Detect ORB features and compute descriptors.
         orb = cv2.ORB_create(self.MAX_FEATURES)
         keypoints1, descriptors1 = orb.detectAndCompute(im_gray, None)
@@ -166,11 +166,25 @@ class CycladesTracker:
         
         return im1Reg
 
-    def run(self, video_path):
-        # At first processing of the first frame
-        video, width, height, fps = utils.get_video(video_path)
+    def initialize_background_subtractor(self, images = None):
+        foreground_knn = cv2.createBackgroundSubtractorKNN()
 
-        first_frame = utils.get_one_frame(video, frame_num=0, current_frame=0)
+        if images is None: #! First every initialization
+            empty_board_color, empty_board_gray = self.preprocess_each_frame(self.empty_board_image)
+            empty_board_color = self.alignImageToFirstFrame(empty_board_gray, empty_board_color)
+        else: #! reinitialization
+            empty_board_color, empty_board_gray = images
+
+        for i in range(20):
+            foreground_knn.apply(empty_board_color)
+
+        return foreground_knn
+
+    def analyze_left_part(left_color, left_gray):
+        cv2.imshow("left_color", left_color)
+        cv2.imshow("left_gray", left_gray)
+
+    def initialize_first_frame(self, first_frame, first_frame_gray=None):
         self.first_frame_color, self.first_frame_gray = self.preprocess_each_frame(first_frame)
         self.height, self.width = self.first_frame_gray.shape
 
@@ -182,18 +196,36 @@ class CycladesTracker:
 
         self.map_circles = utils.find_circles(self.right_part_gray, equalize=None, minDist=30, param1=170, param2=20, minRadius=12, maxRadius=25)
         self.map_circles = self.label_circles(self.map_circles, self.right_part_color)
+        self.foreground_knn = self.initialize_background_subtractor()
+
+    def reinitialize_first_frame(self, frame_color, frame_gray):
+        self.first_frame_color, self.first_frame_gray = frame_color, frame_gray
+
+        self.first_frame_key, self.first_frame_desc = self.orb.detectAndCompute(self.first_frame_gray, None)
+
+        #self.foreground_knn = self.initialize_background_subtractor((frame_color, frame_gray))
+
+    def run(self, video_path):
+        # At first processing of the first frame
+        video, width, height, fps = utils.get_video(video_path)
+
+        first_frame = utils.get_one_frame(video, frame_num=0, current_frame=0)
+
+        self.initialize_first_frame(first_frame)
 
         current_frame = 0
 
         #than processing of later ones withouth unnecessary steps, just updates
         while video.isOpened():
-            video.set(cv2.CAP_PROP_POS_FRAMES, current_frame*10) # 3fps 
+            video.set(cv2.CAP_PROP_POS_FRAMES, current_frame) 
             ret, frame = video.read()
             
             if ret:
-                current_frame +=1
+                current_frame += 10 # 3fps
                 frame_color, frame_gray = self.preprocess_each_frame(frame)
                 frame_color = self.alignImageToFirstFrame(frame_gray, frame_color) #! I don't know where exactly this should be done so that grayscale images is warped too... to be discussed
+
+                
 
                 self.left_part_color, self.left_part_gray, self.right_part_color, self.right_part_gray = self.separate(frame_color,frame_gray)
 
@@ -201,11 +233,22 @@ class CycladesTracker:
                 foreground = cv2.morphologyEx(foreground, cv2.MORPH_OPEN, np.ones((7,7), dtype=np.uint8))
                 frame_color = self.update_interesting_objects(foreground, frame_color)
 
+                #! WE reupdate our first frame if we detect some problems with foreground
+                #! This actually may make things even worse if we do this in wrong moment e.g when we have hand on the screen it became background
+                # if current_frame % 300 == 0:
+                #     print("REINITIALIZE")
+                #     self.reinitialize_first_frame(frame_color, cv2.cvtColor(frame_color, cv2.COLOR_BGR2GRAY)) #! gray frame is not warped by default this should be rethought
+
+
                 self.right_part = self.draw_circles(self.right_part_color, self.map_circles)
+
+                #self.analyze_left_part(self.left_part_color, self.left_part_gray)
+
                 cv2.imshow("left", self.left_part_color)
                 cv2.imshow("right", self.right_part_color)
                 cv2.imshow("game look", np.concatenate([self.left_part_color, self.right_part_color], axis=1))
                 cv2.imshow("foreground", foreground)
+  
 
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
@@ -214,5 +257,5 @@ class CycladesTracker:
            
 
 if __name__ == "__main__":
-    tracker = CycladesTracker()
+    tracker = CycladesTracker(empty_board_path="empty_board.jpg")
     tracker.run("data/cyklady_lvl1_1.mp4")
