@@ -26,7 +26,6 @@ class CycladesTracker:
         fg_cv2 = cv2.filter2D(frame[:,:,2].astype(g2.dtype), -1, g2)
 
         filtered = (np.maximum(np.zeros_like(fg_cv), fg_cv + fg_cv2) > 20).sum(axis=0)
-
         line_x = np.where(filtered > 300)[0][0]
 
         return line_x - 10
@@ -71,7 +70,7 @@ class CycladesTracker:
         for circle in circles[0,:]:
             x,y,r = circle
             
-            x1,y1 = x - r, y - r # making square out of a circle
+            x1,y1 = max(int(x) - r, 0), max(int(y) - r, 0) # making square out of a circle
             x2,y2 = x + r, y + r
 
             circle[2] = 19 # Setting constant radius to the circle
@@ -144,7 +143,7 @@ class CycladesTracker:
         obj_type = self.object_type(x, y, w, h)
         name = color + " " + obj_type
 
-        if "unknown" in name or w*h > 1000:
+        if "unknown" in name or w*h > 1000 or w*h > 150:
             return False
 
         if name in self.objects.keys():
@@ -247,12 +246,15 @@ class CycladesTracker:
 
         self.first_frame_key, self.first_frame_desc = self.orb.detectAndCompute(self.first_frame_gray, None)
  
-        self.intersecting_line_x = self.find_separating_line(self.first_frame_color)
+        # self.intersecting_line_x = self.find_separating_line(self.first_frame_color)
+        self.intersecting_line_x = 300
 
         self.left_part_color, self.left_part_gray, self.right_part_color, self.right_part_gray = self.separate(self.first_frame_color, self.first_frame_gray)
 
         self.empty_board_image = cv2.resize(
             self.empty_board_image, None, fx=0.4, fy=0.4)
+       
+        
         self.left_empty_board_image, _, self.right_empty_board_image, _ = self.separate(self.empty_board_image, self.empty_board_image)
         self.map_circles = utils.find_circles(self.right_part_gray, equalize=None, minDist=30, param1=170, param2=20, minRadius=12, maxRadius=25)
         self.map_circles = self.label_circles(self.map_circles, self.right_part_color)
@@ -304,4 +306,4 @@ class CycladesTracker:
 
 if __name__ == "__main__":
     tracker = CycladesTracker(empty_board_path="data/empty_board.jpg")
-    tracker.run("data/cyklady_lvl1_1.mp4")
+    tracker.run("data/cyklady_lvl3_1.mp4")
