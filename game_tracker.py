@@ -297,7 +297,7 @@ class CycladesTracker:
                 foreground = self.foreground_knn.apply(cv2.GaussianBlur(frame_color, (7,7), 0)) #! whether or not blur is usefull is not sure
                 foreground = cv2.morphologyEx(foreground, cv2.MORPH_OPEN, np.ones((7,7), dtype=np.uint8)) * self.mask # To filter defined background we multiply by mask
                 foreground = ((foreground > 200) * 255).astype(np.uint8) # To have only very intense foreground
-                frame_color = self.update_interesting_objects(foreground, frame_color)
+                frame_color, candidates = self.update_interesting_objects(foreground, frame_color, candidates)
 
                 #! WE reupdate our first frame if we detect some problems with foreground
                 #! This actually may make things even worse if we do this in wrong moment e.g when we have hand on the screen it became background
