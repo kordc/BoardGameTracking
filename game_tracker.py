@@ -3,18 +3,18 @@ import numpy as np
 import utils
 
 class CycladesTracker:
-    def __init__(self,):
+    def __init__(self, empty_board_path):
         self.blur = False
         self.equalize = "local"
         self.foreground_knn = cv2.createBackgroundSubtractorKNN()
+
+        self.empty_board_image = cv2.imread(empty_board_path)
 
         self.MAX_FEATURES = 500
         self.GOOD_MATCH_PERCENT = 0.15
         self.orb = cv2.ORB_create(self.MAX_FEATURES)
 
-        self.objects = {'red_ships': [], 'yellow_ships': [], 'black_ships': [],
-                        'red_counters': [], 'yellow_counters': [], 'black_counters': [],
-                        'cards': []}
+        self.objects = {}
 
     def find_separating_line(self, frame):
         # Find point dividing left and right part of the board
@@ -87,8 +87,10 @@ class CycladesTracker:
 
             if land_ratio > 0.08:
                 labeled_circles.append((circle, "land"))
+                self.right_empty_board_image[y1:y2, x1:x2] = (0, 255, 0)
             elif sea_ratio > 0.7:
                 labeled_circles.append((circle, "sea"))
+                self.right_empty_board_image[y1:y2, x1:x2] = (255, 0, 0)
             
         return labeled_circles
 
@@ -105,44 +107,54 @@ class CycladesTracker:
 
         return frame
 
-    def classify_objects(self, x, y, w, h, frame):
-        yellow = utils.segment_by_hsv_color(frame[y:y+h, x:x+w], np.array([20, 100, 100]), np.array([30, 255, 255]))
-        black = utils.segment_by_hsv_color(frame[y:y+h, x:x+w], np.array([0, 0, 0]), np.array([180, 255, 30]))
-        red = utils.segment_by_hsv_color(frame[y:y+h, x:x+w], np.array([0, 100, 100]), np.array([10, 255, 255]))
+    def object_type(self, x, y, w, h):
         sea_mask = utils.segment_by_hsv_color(
-            frame[y:y+h, x:x+w], np.array([50, 50, 50]), np.array([110, 255, 255]))
+            self.right_empty_board_image[y:y+h, x:x+w], np.array([100, 100, 100]), np.array([140, 255, 255]))
         land_mask = utils.segment_by_hsv_color(
-            frame[y:y+h, x:x+w], np.array([10, 50, 50]), np.array([49, 255, 255]))
-
+            self.right_empty_board_image[y:y+h, x:x+w], np.array([50, 50, 50]), np.array([70, 255, 255]))
         total = w * h * 255
         sea_ratio = np.sum(sea_mask) / total
         land_ratio = np.sum(land_mask) / total
 
-        obj_type = ""
-        # if land_ratio > 0.01:
-        #     obj_type = "land"
-        # elif sea_ratio > 0.2:
-        #     obj_type = "ship"
-        # else:
-        #     obj_type = "cardboard"
+        obj_type = "unknown"
+        if land_ratio > sea_ratio and land_ratio > 0.1:
+            obj_type = "land"
+        elif sea_ratio > land_ratio and sea_ratio > 0.1:
+            obj_type = "ship"
+        
+        return obj_type
 
-        if black.sum() > black.size * 0.8 and black.sum() > red.sum() and black.sum() > yellow.sum():
-            cv2.putText(frame, "black " + obj_type, (x, y),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-            self.objects['black_ships'].append([x, y, w, h])
-            return True
-        if red.sum() > red.size * 0.8 and red.sum() > yellow.sum() and red.sum() > black.sum():
-            cv2.putText(frame, "red " + obj_type, (x, y),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-            self.objects['red_ships'].append([x, y, w, h])
-            return True
+    def object_color(self, yellow, black, red):
         if yellow.sum() > yellow.size * 0.8 and yellow.sum() > red.sum() and yellow.sum() > black.sum():
-            cv2.putText(frame, "yellow " + obj_type, (x, y),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-            self.objects['yellow_ships'].append([x, y, w, h])
-            return True
+            return "yellow"
+        elif black.sum() > black.size * 0.8 and black.sum() > red.sum() and black.sum() > yellow.sum():
+            return "black"
+        elif red.sum() > red.size * 0.8 and red.sum() > yellow.sum() and red.sum() > black.sum():
+            return "red"
+        else:
+            return "unknown"
 
-        return False
+    
+    def classify_objects(self, x, y, w, h, frame):
+        yellow = utils.segment_by_hsv_color(frame[y:y+h, x:x+w], np.array([20, 100, 100]), np.array([30, 255, 255]))
+        black = utils.segment_by_hsv_color(frame[y:y+h, x:x+w], np.array([0, 0, 0]), np.array([180, 255, 30]))
+        red = utils.segment_by_hsv_color(frame[y:y+h, x:x+w], np.array([0, 100, 100]), np.array([10, 255, 255]))
+
+        color = self.object_color(yellow, black, red)
+        obj_type = self.object_type(x, y, w, h)
+        name = color + " " + obj_type
+
+        if "unknown" in name or w*h > 1000:
+            return False
+
+        cv2.putText(frame, name, (x, y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        
+        if not name in self.objects.keys():
+            self.objects[name] = [[x, y, w, h]]
+        else:
+            self.objects[name].append([x, y, w, h])
+        return True
     
     def update_interesting_objects(self, foreground, frame, candidates):
         # bases on foreground it updates interesting objects
@@ -171,8 +183,9 @@ class CycladesTracker:
                 if new_candidates[tuple(new[i])] == 3: # If box was seen twice in the same place we track it
                     correct_boxes.append(new[i])
                     x,y,w,h = new[i]
-                    cv2.rectangle(frame,(x,y),(x+w,y+h),(255,0,0),2)
-                    _ = self.classify_objects(x, y, w, h, frame)
+                    if self.classify_objects(x, y, w, h, frame):
+                        cv2.rectangle(frame, (x, y), (x+w, y+h),
+                                      (255, 0, 0), 2)
             candidates = new_candidates
         return frame, candidates
 
@@ -229,12 +242,15 @@ class CycladesTracker:
 
         self.left_part_color, self.left_part_gray, self.right_part_color, self.right_part_gray = self.separate(self.first_frame_color, self.first_frame_gray)
 
+        self.empty_board_image = cv2.resize(
+            self.empty_board_image, None, fx=0.4, fy=0.4)
+        self.left_empty_board_image, _, self.right_empty_board_image, _ = self.separate(self.empty_board_image, self.empty_board_image)
         self.map_circles = utils.find_circles(self.right_part_gray, equalize=None, minDist=30, param1=170, param2=20, minRadius=12, maxRadius=25)
         self.map_circles = self.label_circles(self.map_circles, self.right_part_color)
 
         current_frame = 0
         candidates = None
-
+        
         #than processing of later ones withouth unnecessary steps, just updates
         while video.isOpened():
             video.set(cv2.CAP_PROP_POS_FRAMES, current_frame*10) # 3fps 
@@ -278,5 +294,5 @@ class CycladesTracker:
            
 
 if __name__ == "__main__":
-    tracker = CycladesTracker()
+    tracker = CycladesTracker(empty_board_path="data/empty_board.jpg")
     tracker.run("data/cyklady_lvl1_1.mp4")
