@@ -2,4 +2,5 @@
 *avi
 file.md
 __pycache__
-*jpg
+matches.jpg
+.vscode/*
