@@ -109,7 +109,30 @@ class CycladesTracker:
 
         return frame
 
-    def object_type(self, x, y, w, h):
+    def detect_islands(self, frame):
+        land_mask = utils.segment_by_hsv_color(
+            self.segmented_right_part, np.array([50, 50, 50]), np.array([70, 255, 255]))
+        land_mask = cv2.erode(land_mask, np.ones((3, 3)), iterations=1)
+        land_mask = cv2.dilate(land_mask, np.ones((3, 3)), iterations=6)
+        cnts, hier = cv2.findContours(
+            land_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        islands = {}
+        for cnt in cnts:
+            if cv2.contourArea(cnt) > 10000:
+                continue
+            if cnt.shape[0] > 5:
+                islands[cnt] = None
+        return islands
+
+    
+    def detect_current_island(self, x, y, w, h, frame):
+        for island in self.islands.keys():
+            xr, yr, wr, hr = cv2.boundingRect(island)
+            if x > xr*0.8 and x+w < (xr+wr)*1.2 and y > yr*0.8 and y+h < (yr+hr)*1.2:
+                return island
+        return None
+    
+    def object_type(self, x, y, w, h, frame):
         sea_mask = utils.segment_by_hsv_color(
             self.segmented_right_part[y:y+h, x:x+w], np.array([100, 100, 100]), np.array([140, 255, 255]))
         land_mask = utils.segment_by_hsv_color(
@@ -139,6 +162,16 @@ class CycladesTracker:
         else:
             return "unknown"
 
+
+    def get_font_color(self, color):
+        if color == "yellow":
+            font_color = (0, 255, 255)
+        elif color == "black":
+            font_color = (0, 0, 0)
+        elif color == "red":
+            font_color = (0, 0, 255)
+        else:
+            font_color = (255, 255, 255)
     
     def classify_objects(self, x, y, w, h, frame):
         yellow = utils.segment_by_hsv_color(frame[y:y+h, x:x+w], np.array([20, 100, 100]), np.array([30, 255, 255]))
@@ -146,7 +179,7 @@ class CycladesTracker:
         red = utils.segment_by_hsv_color(frame[y:y+h, x:x+w], np.array([0, 100, 100]), np.array([10, 255, 255]))
 
         color = self.object_color(yellow, black, red)
-        obj_type = self.object_type(x, y, w, h)
+        obj_type = self.object_type(x, y, w, h, frame)
         name = color + " " + obj_type
 
         if "unknown" in name or w*h > 1000 or w*h < 150:
@@ -160,10 +193,21 @@ class CycladesTracker:
                 four = abs(coords[3] - h) < 10
                 if one and two and three and four:
                     return False
-
-        cv2.putText(frame, name, (x, y),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-        
+        font_color = self.get_font_color(color)
+        cv2.putText(frame, obj_type, (x, y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, font_color, 2)
+        if obj_type == "land":
+            current_island = self.detect_current_island(x, y, w, h, frame)
+            if current_island is not None:
+                ellipse = cv2.fitEllipse(current_island)
+                xr, yr, wr, hr = cv2.boundingRect(current_island)
+                new_owner = False
+                if self.islands[current_island] is not None:
+                    new_owner = True
+                self.islands[current_island] = [color, ellipse, new_owner]
+                # cv2.ellipse(frame, ellipse, (0, 255, 0), 2)
+                # cv2.putText(frame, "island", (xr, yr),
+                #             cv2.FONT_HERSHEY_SIMPLEX, 1, font_color, 2)
         if not name in self.objects.keys():
             self.objects[name] = [[x, y, w, h]]
         else:
@@ -178,10 +222,6 @@ class CycladesTracker:
             x,y,w,h = cv2.boundingRect(cnt)
 
             boxes.append([x,y,w,h]) # Getting coordinates of every new found box
-            # area = cv2.contourArea(cnt)
-            #cv2.rectangle(frame,(x,y),(x+w,y+h),(0,255,0),2)
-            # cv2.putText(frame, str(area), (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-            # _ = self.classify_objects(x, y, w, h, frame)
         
         if len(boxes) == 0:
             return frame, candidates
@@ -191,13 +231,6 @@ class CycladesTracker:
         else:
             old = list(candidates.keys()) #previous candidates
             new = boxes # currently found boxes
-
-            # if w*h > 5000:
-            #                 self.mask[y:y+h, x:x+w] = 0
-            #             if w*h < 50:
-            #                 continue
-            #             cv2.rectangle(frame,(x,y),(x+w,y+h),(255,0,0),2)
-            #             cv2.putText(frame, str(w*h), (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
             matches = utils.centres_within(np.array(old), np.array(new)) # which box match to whom
             new_candidates = {tuple(box): 1 for box in boxes}
@@ -209,7 +242,7 @@ class CycladesTracker:
                     x,y,w,h = new[i]
                     if self.classify_objects(x, y, w, h, frame):
                         cv2.rectangle(frame, (x, y), (x+w, y+h),
-                                      (255, 0, 0), 2)
+                                      (255, 255, 0), 2)
             candidates = new_candidates
         return frame, candidates
 
@@ -277,8 +310,8 @@ class CycladesTracker:
 
         self.first_frame_key, self.first_frame_desc = self.orb.detectAndCompute(self.first_frame_gray, None)
  
-        self.intersecting_line_x = self.find_separating_line(self.first_frame_color)
-        #self.intersecting_line_x = 300
+        # self.intersecting_line_x = self.find_separating_line(self.first_frame_color)
+        self.intersecting_line_x = 300
 
         self.left_part_color, self.right_part_color = self.separate(self.first_frame_color)
         self.left_part_gray, self.right_part_gray = self.separate(self.first_frame_gray)
@@ -287,6 +320,7 @@ class CycladesTracker:
         self.map_circles = utils.find_circles(self.right_part_gray, equalize=None, minDist=30, param1=170, param2=20, minRadius=12, maxRadius=25)
         self.map_circles = self.label_circles(self.map_circles, self.right_part_color)
         self.foreground_knn = self.initialize_background_subtractor()
+        self.islands = self.detect_islands(self.right_part_color)
 
     def reinitialize_first_frame(self, frame_color, frame_gray):
         # reinitializes mask for alignment
@@ -301,17 +335,15 @@ class CycladesTracker:
 
         edges = cv2.Canny(cv2.medianBlur(self.empty_board_color,3), 200,250, apertureSize=3)
         linesP = cv2.HoughLinesP(edges, 1, np.pi / 180, 100, None, 400, 20)
-        line = linesP[0][0]
+        # line = linesP[0][0]
+        line = np.array([14, 424, 100, 14])
         bounding_points = np.linspace(line[2]-5, line[3]-5, self.empty_board_color.shape[0]).astype(np.uint8)
 
         mask = np.ones_like(self.empty_board_gray)
         for i, boundary in enumerate(bounding_points):
             mask[i, :boundary] = 0
         
-        self.mask = mask
-
-        #cv2.imshow("mask", mask)
-                
+        self.mask = mask                
 
     def run(self, video_path):
         # At first processing of the first frame
@@ -367,7 +399,6 @@ class CycladesTracker:
                 cv2.imshow("right", self.right_part_color)
                 cv2.imshow("game look", np.concatenate([self.left_part_color, self.right_part_color], axis=1))
                 cv2.imshow("foreground", foreground)
-                cv2.imshow("empty", self.segmented_right_part)
   
                 cv2.imshow("stats", self.stats)
 
@@ -379,4 +410,4 @@ class CycladesTracker:
 
 if __name__ == "__main__":
     tracker = CycladesTracker(empty_board_path="data/empty_board.jpg")
-    tracker.run("data/cyklady_lvl1_2.mp4")
+    tracker.run("data/cyklady_lvl1_1.mp4")
