@@ -8,8 +8,7 @@ class CycladesTracker:
         self.equalize = "local"
         
         self.empty_board_image = cv2.imread(empty_board_path)
-
-        self.empty_board_image = cv2.imread(empty_board_path)
+        self.empty_board_color, self.empty_board_gray = self.preprocess_each_frame(self.empty_board_image)
 
         self.MAX_FEATURES = 500
         self.GOOD_MATCH_PERCENT = 0.15
@@ -41,10 +40,10 @@ class CycladesTracker:
 
         return bgr
 
-    def separate(self, frame_c, frame_gray):
+    def separate(self, frame):
         # separates everything
-        return frame_c[:,:self.intersecting_line_x], frame_gray[:,:self.intersecting_line_x],\
-                     frame_c[:,self.intersecting_line_x:], frame_gray[:,self.intersecting_line_x:]
+        return frame[:,:self.intersecting_line_x], frame[:,self.intersecting_line_x:]
+
     
     def preprocess_each_frame(self,frame):
         # make processing that is applied to every frame
@@ -66,7 +65,10 @@ class CycladesTracker:
         return frame, frame_gray
 
     def label_circles(self, circles, frame):
-        # label circles with sea or land 
+        # label circles with sea or land
+        self.segmented_right_part = frame.copy()
+        #self.segmented_right_part[:,:,0] = 255
+
         labeled_circles = []
         for circle in circles[0,:]:
             x,y,r = circle
@@ -85,12 +87,12 @@ class CycladesTracker:
             sea_ratio = np.sum(sea_mask) / total
             land_ratio = np.sum(land_mask)/ total
 
-            # if land_ratio > 0.08:
-            #     labeled_circles.append((circle, "land"))
-            #     self.right_empty_board_image[y1:y2, x1:x2] = (0, 255, 0)
-            # elif sea_ratio > 0.7:
-            #     labeled_circles.append((circle, "sea"))
-            #     self.right_empty_board_image[y1:y2, x1:x2] = (255, 0, 0)
+            if land_ratio > 0.08:
+                labeled_circles.append((circle, "land"))
+                self.segmented_right_part[y1:y2, x1:x2] = (0, 255, 0)
+            elif sea_ratio > 0.7:
+                labeled_circles.append((circle, "sea"))
+                self.segmented_right_part[y1:y2, x1:x2] = (255, 0, 0)
             
         return labeled_circles
 
@@ -109,9 +111,12 @@ class CycladesTracker:
 
     def object_type(self, x, y, w, h):
         sea_mask = utils.segment_by_hsv_color(
-            self.right_empty_board_image[y:y+h, x:x+w], np.array([100, 100, 100]), np.array([140, 255, 255]))
+            self.segmented_right_part[y:y+h, x:x+w], np.array([100, 100, 100]), np.array([140, 255, 255]))
         land_mask = utils.segment_by_hsv_color(
-            self.right_empty_board_image[y:y+h, x:x+w], np.array([50, 50, 50]), np.array([70, 255, 255]))
+            self.segmented_right_part[y:y+h, x:x+w], np.array([50, 50, 50]), np.array([70, 255, 255]))
+        # sea_mask = self.segmented_right_part[y:y+h, x:x+w,0] == 255
+        # land_mask = self.segmented_right_part[y:y+h, x:x+w,1] == 255
+
         total = w * h * 255
         sea_ratio = np.sum(sea_mask) / total
         land_ratio = np.sum(land_mask) / total
@@ -144,7 +149,7 @@ class CycladesTracker:
         obj_type = self.object_type(x, y, w, h)
         name = color + " " + obj_type
 
-        if "unknown" in name or w*h > 1000 or w*h > 150:
+        if "unknown" in name or w*h > 1000 or w*h < 150:
             return False
 
         if name in self.objects.keys():
@@ -171,8 +176,11 @@ class CycladesTracker:
         boxes, correct_boxes = [], []
         for cnt in cnts:
             x,y,w,h = cv2.boundingRect(cnt)
+
             boxes.append([x,y,w,h]) # Getting coordinates of every new found box
-            # cv2.rectangle(frame,(x,y),(x+w,y+h),(0,255,0),2)
+            # area = cv2.contourArea(cnt)
+            #cv2.rectangle(frame,(x,y),(x+w,y+h),(0,255,0),2)
+            # cv2.putText(frame, str(area), (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
             # _ = self.classify_objects(x, y, w, h, frame)
         
         if len(boxes) == 0:
@@ -183,6 +191,13 @@ class CycladesTracker:
         else:
             old = list(candidates.keys()) #previous candidates
             new = boxes # currently found boxes
+
+            # if w*h > 5000:
+            #                 self.mask[y:y+h, x:x+w] = 0
+            #             if w*h < 50:
+            #                 continue
+            #             cv2.rectangle(frame,(x,y),(x+w,y+h),(255,0,0),2)
+            #             cv2.putText(frame, str(w*h), (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
             matches = utils.centres_within(np.array(old), np.array(new)) # which box match to whom
             new_candidates = {tuple(box): 1 for box in boxes}
@@ -240,20 +255,21 @@ class CycladesTracker:
         foreground_knn = cv2.createBackgroundSubtractorKNN()
 
         if images is None: #! First every initialization
-            empty_board_color, empty_board_gray = self.preprocess_each_frame(self.empty_board_image)
-            empty_board_color = self.alignImageToFirstFrame(empty_board_gray, empty_board_color)
+            empty_board_color = self.alignImageToFirstFrame(self.empty_board_gray, self.empty_board_color)
         else: #! reinitialization, but not used
             empty_board_color, empty_board_gray = images
 
-        for i in range(20):
+        for i in range(10):
             foreground_knn.apply(empty_board_color)
 
         return foreground_knn
 
-    def analyze_left_part(left_color, left_gray):
+    def analyze_left_part(self, color, gray, foreground):
         #! not used yet
-        cv2.imshow("left_color", left_color)
-        cv2.imshow("left_gray", left_gray)
+        color, self.left_candidates = self.update_interesting_objects(foreground, color, self.left_candidates)
+        cv2.imshow("left_color", color)
+        cv2.imshow("left_fg", foreground)
+        #cv2.imshow("left_gray", left_gray)
 
     def initialize_first_frame(self, first_frame):
         self.first_frame_color, self.first_frame_gray = self.preprocess_each_frame(first_frame)
@@ -261,16 +277,13 @@ class CycladesTracker:
 
         self.first_frame_key, self.first_frame_desc = self.orb.detectAndCompute(self.first_frame_gray, None)
  
-        # self.intersecting_line_x = self.find_separating_line(self.first_frame_color)
-        self.intersecting_line_x = 300
+        self.intersecting_line_x = self.find_separating_line(self.first_frame_color)
+        #self.intersecting_line_x = 300
 
-        self.left_part_color, self.left_part_gray, self.right_part_color, self.right_part_gray = self.separate(self.first_frame_color, self.first_frame_gray)
+        self.left_part_color, self.right_part_color = self.separate(self.first_frame_color)
+        self.left_part_gray, self.right_part_gray = self.separate(self.first_frame_gray)
 
-        self.empty_board_image = cv2.resize(
-            self.empty_board_image, None, fx=0.4, fy=0.4)
        
-        
-        self.left_empty_board_image, _, self.right_empty_board_image, _ = self.separate(self.empty_board_image, self.empty_board_image)
         self.map_circles = utils.find_circles(self.right_part_gray, equalize=None, minDist=30, param1=170, param2=20, minRadius=12, maxRadius=25)
         self.map_circles = self.label_circles(self.map_circles, self.right_part_color)
         self.foreground_knn = self.initialize_background_subtractor()
@@ -285,13 +298,13 @@ class CycladesTracker:
 
     def get_mask_of_left_mess(self):
         #Cut of the left background
-        empty_board_color, empty_board_gray = self.preprocess_each_frame(self.empty_board_image)
-        edges = cv2.Canny(cv2.medianBlur(empty_board_color,3), 200,250, apertureSize=3)
+
+        edges = cv2.Canny(cv2.medianBlur(self.empty_board_color,3), 200,250, apertureSize=3)
         linesP = cv2.HoughLinesP(edges, 1, np.pi / 180, 100, None, 400, 20)
         line = linesP[0][0]
-        bounding_points = np.linspace(line[2]-5, line[3]-5, empty_board_color.shape[0]).astype(np.uint8)
+        bounding_points = np.linspace(line[2]-5, line[3]-5, self.empty_board_color.shape[0]).astype(np.uint8)
 
-        mask = np.ones_like(empty_board_gray)
+        mask = np.ones_like(self.empty_board_gray)
         for i, boundary in enumerate(bounding_points):
             mask[i, :boundary] = 0
         
@@ -310,27 +323,26 @@ class CycladesTracker:
 
         current_frame = 0
         candidates = None
-        
+        self.left_candidates = None
         #than processing of later ones withouth unnecessary steps, just updates
         while video.isOpened():
             video.set(cv2.CAP_PROP_POS_FRAMES, current_frame) 
             ret, frame = video.read()
             
             if ret:
-                current_frame += 10 # 3fps
+                current_frame += 15 # 3fps
                 frame_color, frame_gray = self.preprocess_each_frame(frame)
                 frame_color = self.alignImageToFirstFrame(frame_gray, frame_color) #! I don't know where exactly this should be done so that grayscale images is warped too... to be discussed
-
                 
-                self.left_part_color, self.left_part_gray, self.right_part_color, self.right_part_gray = self.separate(frame_color,frame_gray)
+                self.left_part_color,self.right_part_color = self.separate(frame_color)
 
-                foreground = self.foreground_knn.apply(cv2.GaussianBlur(frame_color, (7,7), 0)) #! whether or not blur is usefull is not sure
+                foreground = self.foreground_knn.apply(cv2.GaussianBlur(frame_color, (3,3), 0)) #! whether or not blur is usefull is not sure
                 foreground = cv2.morphologyEx(foreground, cv2.MORPH_OPEN, np.ones((7,7), dtype=np.uint8)) * self.mask # To filter defined background we multiply by mask
                 foreground = ((foreground > 200) * 255).astype(np.uint8) # To have only very intense foreground
 
                 #self.analyze_left_part(self.left_part_color, self.left_part_gray)
 
-                foreground_left, _, foreground_right, __ = self.separate(foreground, foreground)
+                foreground_left, foreground_right = self.separate(foreground)
                 
                 self.right_part_color, candidates = self.update_interesting_objects(
                     foreground_right, self.right_part_color, candidates)
@@ -341,7 +353,7 @@ class CycladesTracker:
                     print("REINITIALIZE")
                     self.reinitialize_first_frame(frame_color, cv2.cvtColor(frame_color, cv2.COLOR_BGR2GRAY)) #! gray frame is not warped by default this should be rethought
 
-                self.right_part = self.draw_circles(self.right_part_color, self.map_circles)
+                #self.right_part = self.draw_circles(self.right_part_color, self.map_circles)
 
                 h = 0
                 self.stats = np.zeros(
@@ -355,6 +367,7 @@ class CycladesTracker:
                 cv2.imshow("right", self.right_part_color)
                 cv2.imshow("game look", np.concatenate([self.left_part_color, self.right_part_color], axis=1))
                 cv2.imshow("foreground", foreground)
+                cv2.imshow("empty", self.segmented_right_part)
   
                 cv2.imshow("stats", self.stats)
 
@@ -366,4 +379,4 @@ class CycladesTracker:
 
 if __name__ == "__main__":
     tracker = CycladesTracker(empty_board_path="data/empty_board.jpg")
-    tracker.run("data/cyklady_lvl1_1.mp4")
+    tracker.run("data/cyklady_lvl1_2.mp4")
