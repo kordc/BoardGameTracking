@@ -154,6 +154,9 @@ class CycladesTracker:
             # cv2.rectangle(frame,(x,y),(x+w,y+h),(0,255,0),2)
             # _ = self.classify_objects(x, y, w, h, frame)
         
+        if len(boxes) == 0:
+            return frame, candidates
+
         if not candidates: # if this is first iteration
             candidates = {tuple(box): 1 for box in boxes}
         else:
@@ -246,11 +249,13 @@ class CycladesTracker:
 
                 foreground = self.foreground_knn.apply(cv2.GaussianBlur(frame_color, (3,3), 0))
                 foreground = cv2.morphologyEx(foreground, cv2.MORPH_OPEN, np.ones((7,7), dtype=np.uint8))
+                foreground_left, _, foreground_right, __ = self.separate(foreground, foreground)
                 
-                frame_color, candidates = self.update_interesting_objects(
-                    foreground, frame_color, candidates)
+                self.right_part_color, candidates = self.update_interesting_objects(
+                    foreground_right, self.right_part_color, candidates)
 
-                self.right_part = self.draw_circles(self.right_part_color, self.map_circles)
+                # self.right_part = self.draw_circles(self.right_part_color, self.map_circles)
+
                 h = 0
                 self.stats = np.zeros(
                     self.right_part_color.shape, dtype=np.uint8)
@@ -259,6 +264,7 @@ class CycladesTracker:
                     cv2.putText(self.stats, key + ": " + str(len(l)), (20,
                                 20 + 20 * h), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
                     h += 1
+
                 cv2.imshow("left", self.left_part_color)
                 cv2.imshow("right", self.right_part_color)
                 cv2.imshow("game look", np.concatenate([self.left_part_color, self.right_part_color], axis=1))
