@@ -147,6 +147,15 @@ class CycladesTracker:
         if "unknown" in name or w*h > 1000:
             return False
 
+        if name in self.objects.keys():
+            for coords in self.objects[name]:
+                one = abs(coords[0] - x) < 10
+                two = abs(coords[1] - y) < 10
+                three = abs(coords[2] - w) < 10
+                four = abs(coords[3] - h) < 10
+                if one and two and three and four:
+                    return False
+
         cv2.putText(frame, name, (x, y),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
         
