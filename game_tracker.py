@@ -452,6 +452,7 @@ class CycladesTracker:
     def run(self, video_path):
         # At first processing of the first frame
         video, width, height, fps = utils.get_video(video_path)
+        print(video_path)
 
         first_frame = utils.get_one_frame(video, frame_num=0, current_frame=0)
         self.get_mask_of_left_mess()
@@ -516,4 +517,4 @@ class CycladesTracker:
 
 if __name__ == "__main__":
     tracker = CycladesTracker(empty_board_path="data/empty_board.jpg")
-    tracker.run("data/cyklady_lvl1_3.mp4")
+    tracker.run("data/cyklady_lvl2_1.mp4")
