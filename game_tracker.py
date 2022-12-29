@@ -195,9 +195,7 @@ class CycladesTracker:
                 four = abs(coords[3] - h) < 10
                 if one and two and three and four:
                     return
-        # font_color = self.get_font_color(color)
-        # cv2.putText(frame, obj_type, (x, y),
-        #             cv2.FONT_HERSHEY_SIMPLEX, 1, font_color, 2)
+
         if obj_type == "warrior":
             current_island = self.detect_current_island(x, y, w, h, frame)
             if current_island is not None:
@@ -208,14 +206,11 @@ class CycladesTracker:
                     if self.islands[(xr, yr, wr, hr)][1] != color:
                         new_owner = True
                 self.islands[(xr, yr, wr, hr)] = [current_island[0], color, ellipse, new_owner]
-                # cv2.ellipse(frame, ellipse, (0, 255, 0), 2)
-                # cv2.putText(frame, "island", (xr, yr),
-                #             cv2.FONT_HERSHEY_SIMPLEX, 1, font_color, 2)
+
         if not name in self.objects.keys():
             self.objects[name] = [[x, y, w, h]]
         else:
             self.objects[name].append([x, y, w, h])
-        # return True
     
     def update_interesting_objects(self, foreground, frame, candidates):
         # bases on foreground it updates interesting objects
@@ -348,6 +343,50 @@ class CycladesTracker:
         
         self.mask = mask                
 
+    def update_view(self):
+        h = 0
+        self.stats = np.zeros(
+                self.right_part_color.shape, dtype=np.uint8)
+        self.stats.fill(255)
+        for key, l in self.objects.items():
+            cv2.putText(self.stats, key + ": " + str(len(l)), (20,
+                        20 + 20 * h), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            h += 1
+
+        taken_islands = sum(
+            [1 for island, stats in self.islands.items() if len(stats) > 1])
+        color_islands = {'red': 0, 'black': 0, 'yellow': 0}
+        for island in self.islands.values():
+            if len(island) > 1:
+                color_islands[island[1]] += 1
+        for color, cnt in color_islands.items():
+            cv2.putText(self.stats, color + " islands: " + str(cnt), (20,
+                                                                        20 + 20 * h), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            h += 1
+        cv2.putText(self.stats, "taken islands: " + str(taken_islands), (20,
+                                                                        20 + 20 * h), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+        h += 1
+
+        for island, stats in self.islands.items():
+            if len(stats) <= 1:
+                continue
+            cnt, color, ellipse, new_owner = stats
+            xr, yr, wr, hr = island
+            text = "island"
+            if new_owner is not None:
+                text += " " + str(new_owner)
+            cv2.ellipse(self.right_part_color, ellipse, (0, 255, 0), 2)
+            cv2.putText(self.right_part_color, "island", (xr, yr),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, self.get_font_color(color), 2)
+
+        for object in self.objects.keys():
+            for x, y, w, h in self.objects[object]:
+                color, obj_type = object.split(" ")
+                cv2.rectangle(self.right_part_color, (x, y),
+                                (x + w, y + h), self.get_font_color(color), 2)
+                cv2.putText(self.right_part_color, obj_type, (x, y),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 1, self.get_font_color(color), 2)
+    
     def run(self, video_path):
         # At first processing of the first frame
         video, width, height, fps = utils.get_video(video_path)
@@ -389,35 +428,7 @@ class CycladesTracker:
                     self.reinitialize_first_frame(frame_color, cv2.cvtColor(frame_color, cv2.COLOR_BGR2GRAY)) #! gray frame is not warped by default this should be rethought
 
                 #self.right_part = self.draw_circles(self.right_part_color, self.map_circles)
-
-                h = 0
-                self.stats = np.zeros(
-                    self.right_part_color.shape, dtype=np.uint8)
-                self.stats.fill(255)
-                for key, l in self.objects.items():
-                    cv2.putText(self.stats, key + ": " + str(len(l)), (20,
-                                20 + 20 * h), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-                    h += 1
-                
-                for island, stats in self.islands.items():
-                    if len(stats) <= 1:
-                        continue
-                    cnt, color, ellipse, new_owner = stats
-                    xr, yr, wr, hr = island
-                    text = "island"
-                    if new_owner is not None:
-                        text += " " + str(new_owner)
-                    cv2.ellipse(self.right_part_color, ellipse, (0, 255, 0), 2)
-                    cv2.putText(self.right_part_color, "island", (xr, yr),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, self.get_font_color(color), 2)
-                for object in self.objects.keys():
-                    for x, y, w, h in self.objects[object]:
-                        color, obj_type = object.split(" ")
-                        cv2.rectangle(self.right_part_color, (x, y), (x + w, y + h), self.get_font_color(color), 2)
-                        cv2.putText(self.right_part_color, obj_type, (x, y),
-                                cv2.FONT_HERSHEY_SIMPLEX, 1, self.get_font_color(color), 2)
-
-
+                self.update_view()
                 cv2.imshow("left", self.left_part_color)
                 cv2.imshow("right", self.right_part_color)
                 cv2.imshow("game look", np.concatenate([self.left_part_color, self.right_part_color], axis=1))
