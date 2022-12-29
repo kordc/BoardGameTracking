@@ -121,15 +121,16 @@ class CycladesTracker:
             if cv2.contourArea(cnt) > 10000:
                 continue
             if cnt.shape[0] > 5:
-                islands[cnt] = None
+                xr, yr, wr, hr = cv2.boundingRect(cnt)
+                islands[(xr, yr, wr, hr)] = [cnt]
         return islands
 
     
     def detect_current_island(self, x, y, w, h, frame):
         for island in self.islands.keys():
-            xr, yr, wr, hr = cv2.boundingRect(island)
+            xr, yr, wr, hr = island
             if x > xr*0.8 and x+w < (xr+wr)*1.2 and y > yr*0.8 and y+h < (yr+hr)*1.2:
-                return island
+                return self.islands[island]
         return None
     
     def object_type(self, x, y, w, h, frame):
@@ -146,7 +147,7 @@ class CycladesTracker:
 
         obj_type = "unknown"
         if land_ratio > sea_ratio and land_ratio > 0.1:
-            obj_type = "land"
+            obj_type = "warrior"
         elif sea_ratio > land_ratio and sea_ratio > 0.1:
             obj_type = "ship"
         
@@ -172,6 +173,7 @@ class CycladesTracker:
             font_color = (0, 0, 255)
         else:
             font_color = (255, 255, 255)
+        return font_color
     
     def classify_objects(self, x, y, w, h, frame):
         yellow = utils.segment_by_hsv_color(frame[y:y+h, x:x+w], np.array([20, 100, 100]), np.array([30, 255, 255]))
@@ -183,7 +185,7 @@ class CycladesTracker:
         name = color + " " + obj_type
 
         if "unknown" in name or w*h > 1000 or w*h < 150:
-            return False
+            return
 
         if name in self.objects.keys():
             for coords in self.objects[name]:
@@ -192,19 +194,20 @@ class CycladesTracker:
                 three = abs(coords[2] - w) < 10
                 four = abs(coords[3] - h) < 10
                 if one and two and three and four:
-                    return False
-        font_color = self.get_font_color(color)
-        cv2.putText(frame, obj_type, (x, y),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, font_color, 2)
-        if obj_type == "land":
+                    return
+        # font_color = self.get_font_color(color)
+        # cv2.putText(frame, obj_type, (x, y),
+        #             cv2.FONT_HERSHEY_SIMPLEX, 1, font_color, 2)
+        if obj_type == "warrior":
             current_island = self.detect_current_island(x, y, w, h, frame)
             if current_island is not None:
-                ellipse = cv2.fitEllipse(current_island)
-                xr, yr, wr, hr = cv2.boundingRect(current_island)
+                ellipse = cv2.fitEllipse(current_island[0])
+                xr, yr, wr, hr = cv2.boundingRect(current_island[0])
                 new_owner = False
-                if self.islands[current_island] is not None:
-                    new_owner = True
-                self.islands[current_island] = [color, ellipse, new_owner]
+                if len(self.islands[(xr, yr, wr, hr)]) > 1:
+                    if self.islands[(xr, yr, wr, hr)][1] != color:
+                        new_owner = True
+                self.islands[(xr, yr, wr, hr)] = [current_island[0], color, ellipse, new_owner]
                 # cv2.ellipse(frame, ellipse, (0, 255, 0), 2)
                 # cv2.putText(frame, "island", (xr, yr),
                 #             cv2.FONT_HERSHEY_SIMPLEX, 1, font_color, 2)
@@ -212,7 +215,7 @@ class CycladesTracker:
             self.objects[name] = [[x, y, w, h]]
         else:
             self.objects[name].append([x, y, w, h])
-        return True
+        # return True
     
     def update_interesting_objects(self, foreground, frame, candidates):
         # bases on foreground it updates interesting objects
@@ -240,9 +243,9 @@ class CycladesTracker:
                 if new_candidates[tuple(new[i])] == 3: # If box was seen twice in the same place we track it
                     correct_boxes.append(new[i])
                     x,y,w,h = new[i]
-                    if self.classify_objects(x, y, w, h, frame):
-                        cv2.rectangle(frame, (x, y), (x+w, y+h),
-                                      (255, 255, 0), 2)
+                    self.classify_objects(x, y, w, h, frame)
+                        # cv2.rectangle(frame, (x, y), (x+w, y+h),
+                                    #   (255, 255, 0), 2)
             candidates = new_candidates
         return frame, candidates
 
@@ -362,7 +365,7 @@ class CycladesTracker:
             ret, frame = video.read()
             
             if ret:
-                current_frame += 15 # 3fps
+                current_frame += 10 # 3fps
                 frame_color, frame_gray = self.preprocess_each_frame(frame)
                 frame_color = self.alignImageToFirstFrame(frame_gray, frame_color) #! I don't know where exactly this should be done so that grayscale images is warped too... to be discussed
                 
@@ -395,6 +398,26 @@ class CycladesTracker:
                     cv2.putText(self.stats, key + ": " + str(len(l)), (20,
                                 20 + 20 * h), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
                     h += 1
+                
+                for island, stats in self.islands.items():
+                    if len(stats) <= 1:
+                        continue
+                    cnt, color, ellipse, new_owner = stats
+                    xr, yr, wr, hr = island
+                    text = "island"
+                    if new_owner is not None:
+                        text += " " + str(new_owner)
+                    cv2.ellipse(self.right_part_color, ellipse, (0, 255, 0), 2)
+                    cv2.putText(self.right_part_color, "island", (xr, yr),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, self.get_font_color(color), 2)
+                for object in self.objects.keys():
+                    for x, y, w, h in self.objects[object]:
+                        color, obj_type = object.split(" ")
+                        cv2.rectangle(self.right_part_color, (x, y), (x + w, y + h), self.get_font_color(color), 2)
+                        cv2.putText(self.right_part_color, obj_type, (x, y),
+                                cv2.FONT_HERSHEY_SIMPLEX, 1, self.get_font_color(color), 2)
+
+
                 cv2.imshow("left", self.left_part_color)
                 cv2.imshow("right", self.right_part_color)
                 cv2.imshow("game look", np.concatenate([self.left_part_color, self.right_part_color], axis=1))
