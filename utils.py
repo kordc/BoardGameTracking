@@ -138,3 +138,77 @@ def iou(boxes2,boxes1):
 
     return np.argwhere(iou > 0.5)
     
+def calculate_total(w, h):
+        return w * h * 255
+
+def segment_colors(frame):
+    yellow = segment_by_hsv_color(frame, np.array([20, 100, 100]), np.array([30, 255, 255]))
+    black = segment_by_hsv_color(frame, np.array([0, 0, 0]), np.array([180, 255, 30]))
+    red = segment_by_hsv_color(frame, np.array([0, 100, 100]), np.array([10, 255, 255]))
+
+    return yellow, black, red
+
+def cut_obj(frame, box):
+    x, y, w, h = box
+    return frame[y:y+h, x:x+w]
+
+def get_land_mask(frame, label_circles=False):
+    if label_circles:
+        return segment_by_hsv_color(frame, np.array([10, 50, 50]), np.array([49, 255, 255]))
+    else:
+        return segment_by_hsv_color(frame, np.array([50, 50, 50]), np.array([70, 255, 255]))
+
+def get_sea_mask(frame, label_circles=False):
+    if label_circles:
+        return segment_by_hsv_color(frame, np.array([50, 50, 50]), np.array([110, 255, 255]))
+    else:
+        return segment_by_hsv_color(frame, np.array([100, 100, 100]), np.array([140, 255, 255]))
+
+def update_interesting_objects(foreground, frame, candidates, left=False, debug_contours = False):
+        # bases on foreground it updates interesting objects
+        cnts, hier = cv2.findContours(
+            foreground, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        boxes, correct_boxes = [], [] # boxes found and boxes containing actual object
+        for cnt in cnts:
+            x,y,w,h = cv2.boundingRect(cnt)
+
+            #neglect very small boxes
+            if w*h > 80 and w*h < 12000: 
+                boxes.append([x,y,w,h]) # Getting coordinates of every new found box
+                
+                #For debugging purposes
+                if debug_contours:
+                    cv2.rectangle(frame,(x,y),(x+w,y+h),(0,255,0),2)
+       
+        #there is no valid box to be processed further
+        if len(boxes) == 0:
+            return frame, candidates
+
+        if not candidates: # if this is first iteration
+            candidates = {tuple(box): 1 for box in boxes}
+        else:
+            old = list(candidates.keys()) #previous candidates
+            new = boxes # currently found boxes
+            matches = centres_within(np.array(old), np.array(new)) # which old box match to which new box
+            new_candidates = {tuple(box): 1 for box in boxes}
+            for match in matches: # Box ith from previous iteration matched to jth from this iteration
+                i,j = match
+                #If there is a match we increase counter of old candidate by 1
+                new_candidates[tuple(new[i])] = candidates[old[j]] + 1
+                #! This equality here may be problematic as sometimes more than one box can be matched potentially!
+                # If box was seen for few times we check if it contains an object
+                if new_candidates[tuple(new[i])] == 3:
+                    if debug_contours:
+                        cv2.rectangle(frame, (x, y), (x+w, y+h),(255, 0, 0), 2)
+
+                    correct_boxes.append(new[i])
+                    box = new[i]
+                    
+                    # if left:
+                    #     self.classify_left_objects(box, frame)
+                    # else:
+                    #     self.classify_right_objects(box, frame)
+                        
+            candidates = new_candidates
+        return frame, candidates
+

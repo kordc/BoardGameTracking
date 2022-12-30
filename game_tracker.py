@@ -3,40 +3,19 @@ import numpy as np
 import utils
 
 from board_preparator import BoardPreparator
-
+from left_part_analyzer import LeftPartAnalyzer
 class CycladesTracker:
-    def __init__(self, board_preparator: BoardPreparator):
+    def __init__(self, board_preparator: BoardPreparator, left_part_analyzer: LeftPartAnalyzer):
         self.board_preparator = board_preparator
+        self.left_part_analyzer = left_part_analyzer
 
         self.objects = {}
-        self.left_objects = {}
+        
         self.moved = False
         self.placed = False
         self.waiting_moved = None
-        self.waiting_placed = None
+        self.waiting_placed = None 
 
-        self.gods_colors = {
-            "athena": [np.array([0,0,180]), np.array([180,50,255])], 
-            "ares": [np.array([0, 50, 100]), np.array([20, 255, 255])], 
-            "poseidon": [np.array([90, 50, 150]), np.array([100, 255, 255])], 
-            "zeus": [np.array([110, 50, 150]), np.array([120, 255, 255])],
-        }
-
-    def get_land_mask(self, frame, label_circles=False):
-        if label_circles:
-            return utils.segment_by_hsv_color(frame, np.array([10, 50, 50]), np.array([49, 255, 255]))
-        else:
-            return utils.segment_by_hsv_color(frame, np.array([50, 50, 50]), np.array([70, 255, 255]))
-    
-
-    def get_sea_mask(self, frame, label_circles=False):
-        if label_circles:
-            return utils.segment_by_hsv_color(frame, np.array([50, 50, 50]), np.array([110, 255, 255]))
-        else:
-            return utils.segment_by_hsv_color(frame, np.array([100, 100, 100]), np.array([140, 255, 255]))
-
-    def calculate_total(self, w, h):
-        return w* h * 255
 
     def label_circles(self, circles, frame):
         # label circles with sea or land
@@ -55,10 +34,10 @@ class CycladesTracker:
 
             place = frame[y1:y2, x1:x2]
 
-            sea_mask = self.get_sea_mask(place, label_circles=True)
-            land_mask = self.get_land_mask(place, label_circles=True)
+            sea_mask = utils.get_sea_mask(place, label_circles=True)
+            land_mask = utils.get_land_mask(place, label_circles=True)
 
-            total = self.calculate_total(x2-x1, y2-y1)
+            total = utils.calculate_total(x2-x1, y2-y1)
             sea_ratio = np.sum(sea_mask) / total
             land_ratio = np.sum(land_mask) / total
 
@@ -88,7 +67,7 @@ class CycladesTracker:
         return frame
 
     def detect_islands(self, frame):
-        land_mask = self.get_land_mask(self.segmented_right_part)
+        land_mask = utils.get_land_mask(self.segmented_right_part)
         land_mask = cv2.erode(land_mask, np.ones((3, 3)), iterations=1)
         land_mask = cv2.dilate(land_mask, np.ones((3, 3)), iterations=6)
         cnts, hier = cv2.findContours(
@@ -110,10 +89,10 @@ class CycladesTracker:
         return None
 
     def object_type(self, x, y, w, h, frame):
-        sea_mask = self.get_sea_mask(self.segmented_right_part[y:y+h, x:x+w])
-        land_mask = self.get_land_mask(self.segmented_right_part[y:y+h, x:x+w])
+        sea_mask = utils.get_sea_mask(self.segmented_right_part[y:y+h, x:x+w])
+        land_mask = utils.get_land_mask(self.segmented_right_part[y:y+h, x:x+w])
     
-        total = self.calculate_total(w,h)
+        total = utils.calculate_total(w,h)
         sea_ratio = np.sum(sea_mask) / total
         land_ratio = np.sum(land_mask) / total
 
@@ -146,25 +125,14 @@ class CycladesTracker:
             font_color = (255, 255, 255)
         return font_color
 
-    def segment_colors(self, frame):
-        yellow = utils.segment_by_hsv_color(frame, np.array([20, 100, 100]), np.array([30, 255, 255]))
-        black = utils.segment_by_hsv_color(frame, np.array([0, 0, 0]), np.array([180, 255, 30]))
-        red = utils.segment_by_hsv_color(frame, np.array([0, 100, 100]), np.array([10, 255, 255]))
-
-        return yellow, black, red
-
-    def cut_obj(self, frame, box):
-        x, y, w, h = box
-        return frame[y:y+h, x:x+w]
-
     def is_moved(self, name):
         color = name.split(" ")[0]
         if name not in self.objects.keys(): 
             return -1
 
         for i, obj_box in enumerate(self.objects[name]):
-            cutted= self.cut_obj(self.right_part_color, obj_box)
-            yellow, black, red = self.segment_colors(cutted)
+            cutted= utils.cut_obj(self.right_part_color, obj_box)
+            yellow, black, red = utils.segment_colors(cutted)
             new_color = self.object_color(yellow, black, red)
             if new_color != color:
                 return i
@@ -173,7 +141,7 @@ class CycladesTracker:
 
     def classify_right_objects(self, box, frame):
         x, y, w, h = box
-        yellow, black, red = self.segment_colors(self.right_part_color[y:y+h, x:x+w])
+        yellow, black, red = utils.segment_colors(self.right_part_color[y:y+h, x:x+w])
 
         color = self.object_color(yellow, black, red)
         obj_type = self.object_type(x, y, w, h, frame)
@@ -255,83 +223,12 @@ class CycladesTracker:
 
                     correct_boxes.append(new[i])
                     box = new[i]
-                    if left:
-                        self.classify_left_objects(box, frame)
-                    else:
-                        self.classify_right_objects(box, frame)
+                    
+                  
+                    self.classify_right_objects(box, frame)
                         
             candidates = new_candidates
         return frame, candidates
-
-    def classify_pawn_by_color(self, frame):
-        yellow, black, red = self.segment_colors(frame)
-
-        w,h, _ = frame.shape
-        total = self.calculate_total(w,h)
-        if w * h < 400:
-            if yellow.sum() / total > 0.3:
-                return "yellow"
-            elif red.sum() / total > 0.4:
-                return "red"
-            elif black.sum() / total > 0.4:
-                return "black"
-            
-
-    def get_most_possible_god(self, cutted, total):
-        ratios = []
-        for name, color in self.gods_colors.items():
-                mask = utils.segment_by_hsv_color(cutted, color[0], color[1])
-                #cv2.imshow("mask", mask)
-                #cv2.waitKey(0)
-                ratios.append(mask.sum() / total)
-
-        max_god = np.argmax(ratios)
-        if ratios[max_god] > 0.1:
-            return list(self.gods_colors.keys())[max_god]
-
-    def classify_gods(self, frame):
-        w,h, _ = frame.shape
-        if w*h > 5000:
-            total = self.calculate_total(w,h)
-            god = self.get_most_possible_god(frame, total)
-            return god
-
-    def classify_cards(self, frame):
-        w,h, _ = frame.shape
-        if w*h > 1500 and w*h < 3000:
-            return "card"
-
-    def verify_decision(self, box, decision, frame):
-        x,y,w,h = box
-        if decision:
-            cv2.putText(frame, decision, (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-              
-            #cv2.imshow("detection", frame)
-            #cv2.waitKey(0)
-
-    def check_decision(self, decision, box, frame):
-        if decision:
-            x,y,w,h = box
-            self.board_preparator.mask[y:y+h, x:x+w] = 0
-            self.left_objects[decision] = box
-            #cv2.imshow("detection", frame)
-            #cv2.waitKey(0)
-
-    def classify_left_objects(self, box, frame):
-        cutted = self.cut_obj(frame,box)
-        # cv2.imshow("to be detected", cutted)
-        # cv2.waitKey(0)
-        self.check_decision(self.classify_pawn_by_color(cutted),box,frame)
-        self.check_decision(self.classify_gods(cutted),box,frame)
-        self.check_decision(self.classify_cards(cutted),box,frame)
-
-    def analyze_left_part(self, color, foreground):
-        #! not used yet
-        color, self.left_candidates = self.update_interesting_objects(
-            foreground, color, self.left_candidates, left=True)
-        cv2.imshow("left_color", color)
-        cv2.imshow("left_fg", foreground)
-        cv2.imshow("mask", self.board_preparator.mask*255)
 
     def update_view(self):
         h = 0
@@ -387,12 +284,6 @@ class CycladesTracker:
                 cv2.putText(self.right_part_color, obj_type, (x, y),
                             cv2.FONT_HERSHEY_SIMPLEX, 1, self.get_font_color(color), 2)
         
-        for object in self.left_objects.keys():
-            x,y,w,h = self.left_objects[object]
-            cv2.rectangle(self.left_part_color, (x, y),
-                              (x + w, y + h), (0,255,0), 2)
-            cv2.putText(self.left_part_color, object, (x, y),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
 
     def run(self, video_path):
         # At first processing of the first frame
@@ -416,9 +307,9 @@ class CycladesTracker:
 
             if ret:
                 current_frame_num += 10  # 3fps
-                self.left_part_color, left_foreground, self.right_part_color, right_foreground = self.board_preparator.process(frame, current_frame_num)
+                left_part_color, left_foreground, self.right_part_color, right_foreground = self.board_preparator.process(frame, current_frame_num)
 
-                self.analyze_left_part(self.left_part_color, left_foreground)
+                left_part_color = self.left_part_analyzer.process(left_part_color, left_foreground)
               
                 self.right_part_color, candidates = self.update_interesting_objects(
                     right_foreground, self.right_part_color, candidates)
@@ -427,7 +318,7 @@ class CycladesTracker:
                 self.update_view()
                 #cv2.imshow("left", self.left_part_color)
                 cv2.imshow("right", self.right_part_color)
-                cv2.imshow("game look", np.concatenate([self.left_part_color, self.right_part_color], axis=1))
+                cv2.imshow("game look", np.concatenate([left_part_color, self.right_part_color], axis=1))
                 #cv2.imshow("foreground", foreground)
                 #cv2.imshow("stats", self.stats)
 
@@ -439,5 +330,6 @@ class CycladesTracker:
 
 if __name__ == "__main__":
     board_preparator = BoardPreparator(empty_board_path="data/empty_board.jpg")
-    tracker = CycladesTracker(board_preparator)
-    tracker.run("data/cyklady_lvl2_1.mp4")
+    left_part_analyzer = LeftPartAnalyzer(board_preparator)
+    tracker = CycladesTracker(board_preparator, left_part_analyzer)
+    tracker.run("data/cyklady_lvl1_1.mp4")

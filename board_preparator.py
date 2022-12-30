@@ -159,6 +159,10 @@ class BoardPreparator():
 
         self.mask = mask
 
+    def zero_mask(self, box):
+        x,y,w,h = box
+        self.mask[y:y+h, x:x+w] = 0
+
     def get_foreground(self, frame_color):
         foreground = self.foreground_knn.apply(cv2.GaussianBlur(frame_color, (3, 3), 0))
         foreground = cv2.morphologyEx(foreground, cv2.MORPH_OPEN, np.ones(
