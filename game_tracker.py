@@ -2,19 +2,11 @@ import cv2
 import numpy as np
 import utils
 
+from board_preparator import BoardPreparator
 
 class CycladesTracker:
-    def __init__(self, empty_board_path):
-        self.blur = False
-        self.equalize = "local"
-
-        self.empty_board_image = cv2.imread(empty_board_path)
-        self.empty_board_color, self.empty_board_gray = self.preprocess_each_frame(
-            self.empty_board_image)
-
-        self.MAX_FEATURES = 500
-        self.GOOD_MATCH_PERCENT = 0.15
-        self.orb = cv2.ORB_create(self.MAX_FEATURES)
+    def __init__(self, board_preparator: BoardPreparator):
+        self.board_preparator = board_preparator
 
         self.objects = {}
         self.left_objects = {}
@@ -29,49 +21,6 @@ class CycladesTracker:
             "poseidon": [np.array([90, 50, 150]), np.array([100, 255, 255])], 
             "zeus": [np.array([110, 50, 150]), np.array([120, 255, 255])],
         }
-
-    def find_separating_line(self, frame):
-        # Find point dividing left and right part of the board
-        g = np.ones((10, 10))/100
-        g2 = -np.ones((10, 10))/100
-
-        fg_cv = cv2.filter2D(frame[:, :, 0], -1, g)
-        fg_cv2 = cv2.filter2D(frame[:, :, 2].astype(g2.dtype), -1, g2)
-
-        fg_cv = cv2.filter2D(frame[:,:,0], -1, g)
-        fg_cv2 = cv2.filter2D(frame[:,:,2].astype(g2.dtype), -1, g2)
-
-        filtered = (np.maximum(np.zeros_like(fg_cv), fg_cv + fg_cv2) > 20).sum(axis=0)
-        line_x = np.where(filtered > 200)[0][0]
-
-        return line_x - 10
-
-    def equalize_color_image(self, frame):
-        lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
-        lab_planes = np.array(cv2.split(lab))
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(3, 3))
-        lab_planes[0] = clahe.apply(lab_planes[0])
-        lab = cv2.merge(lab_planes)
-        bgr = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
-
-        return bgr
-
-    def separate(self, frame):
-        # separates everything
-        return frame[:, :self.intersecting_line_x], frame[:, self.intersecting_line_x:]
-
-    def preprocess_each_frame(self, frame):
-        # make processing that is applied to every frame
-        frame = cv2.resize(frame, None, fx=0.4, fy=0.4)
-        if self.blur:
-            frame = cv2.GaussianBlur(frame, (3, 3), 0)
-
-        if self.equalize:  # equalize color image!
-            frame = self.equalize_color_image(frame)
-
-        frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-        return frame, frame_gray
 
     def get_land_mask(self, frame, label_circles=False):
         if label_circles:
@@ -332,8 +281,8 @@ class CycladesTracker:
         ratios = []
         for name, color in self.gods_colors.items():
                 mask = utils.segment_by_hsv_color(cutted, color[0], color[1])
-                cv2.imshow("mask", mask)
-                cv2.waitKey(0)
+                #cv2.imshow("mask", mask)
+                #cv2.waitKey(0)
                 ratios.append(mask.sum() / total)
 
         max_god = np.argmax(ratios)
@@ -357,16 +306,16 @@ class CycladesTracker:
         if decision:
             cv2.putText(frame, decision, (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
               
-            cv2.imshow("detection", frame)
-            cv2.waitKey(0)
+            #cv2.imshow("detection", frame)
+            #cv2.waitKey(0)
 
     def check_decision(self, decision, box, frame):
         if decision:
             x,y,w,h = box
-            self.mask[y:y+h, x:x+w] = 0
+            self.board_preparator.mask[y:y+h, x:x+w] = 0
             self.left_objects[decision] = box
-            cv2.imshow("detection", frame)
-            cv2.waitKey(0)
+            #cv2.imshow("detection", frame)
+            #cv2.waitKey(0)
 
     def classify_left_objects(self, box, frame):
         cutted = self.cut_obj(frame,box)
@@ -375,119 +324,14 @@ class CycladesTracker:
         self.check_decision(self.classify_pawn_by_color(cutted),box,frame)
         self.check_decision(self.classify_gods(cutted),box,frame)
         self.check_decision(self.classify_cards(cutted),box,frame)
-        
 
-    def alignImageToFirstFrame(self, im_gray, im_color):
-        # Detect ORB features and compute descriptors.
-        orb = cv2.ORB_create(self.MAX_FEATURES)
-        keypoints1, descriptors1 = orb.detectAndCompute(im_gray, None)
-
-        # Match features.
-        matcher = cv2.DescriptorMatcher_create(
-            cv2.DESCRIPTOR_MATCHER_BRUTEFORCE_HAMMING)
-        matches = list(matcher.match(
-            descriptors1, self.first_frame_desc, None))
-
-        # Sort matches by score
-        matches.sort(key=lambda x: x.distance, reverse=False)
-
-        # Remove not so good matches
-        numGoodMatches = int(len(matches) * self.GOOD_MATCH_PERCENT)
-        matches = matches[:numGoodMatches]
-
-        # Draw top matches
-        #imMatches = cv2.drawMatches(im_color, keypoints1, self.first_frame_color, self.first_frame_key, matches, None)
-        #cv2.imwrite("matches.jpg", imMatches)
-
-        # Extract location of good matches
-        points1 = np.zeros((len(matches), 2), dtype=np.float32)
-        points2 = np.zeros((len(matches), 2), dtype=np.float32)
-
-        for i, match in enumerate(matches):
-            points1[i, :] = keypoints1[match.queryIdx].pt
-            points2[i, :] = self.first_frame_key[match.trainIdx].pt
-
-        # Find homography
-        h, mask = cv2.findHomography(points1, points2, cv2.RANSAC)
-
-        # Use homography
-        height, width, channels = self.first_frame_color.shape
-        im1Reg = cv2.warpPerspective(im_color, h, (width, height))
-
-        return im1Reg
-
-    def initialize_background_subtractor(self, images=None):
-        foreground_knn = cv2.createBackgroundSubtractorKNN()
-
-        if images is None:  # ! First every initialization
-            empty_board_color = self.alignImageToFirstFrame(
-                self.empty_board_gray, self.empty_board_color)
-        else:  # ! reinitialization, but not used
-            empty_board_color, empty_board_gray = images
-
-        for i in range(10):
-            foreground_knn.apply(empty_board_color)
-
-        return foreground_knn
-
-    def analyze_left_part(self, color, gray, foreground):
+    def analyze_left_part(self, color, foreground):
         #! not used yet
         color, self.left_candidates = self.update_interesting_objects(
             foreground, color, self.left_candidates, left=True)
         cv2.imshow("left_color", color)
         cv2.imshow("left_fg", foreground)
-        cv2.imshow("mask", self.mask*255)
-
-    def initialize_first_frame(self, first_frame):
-        self.first_frame_color, self.first_frame_gray = self.preprocess_each_frame(
-            first_frame)
-        self.height, self.width = self.first_frame_gray.shape
-
-        self.first_frame_key, self.first_frame_desc = self.orb.detectAndCompute(
-            self.first_frame_gray, None)
-
-        self.intersecting_line_x = self.find_separating_line(self.first_frame_color)
-
-        self.left_part_color, self.right_part_color = self.separate(
-            self.first_frame_color)
-        self.left_part_gray, self.right_part_gray = self.separate(
-            self.first_frame_gray)
-
-        self.map_circles = utils.find_circles(
-            self.right_part_gray, equalize=None, minDist=30, param1=170, param2=20, minRadius=12, maxRadius=25)
-        self.map_circles = self.label_circles(
-            self.map_circles, self.right_part_color)
-
-        self.foreground_knn = self.initialize_background_subtractor()
-
-        self.islands = self.detect_islands(self.right_part_color)
-
-    def reinitialize_first_frame(self, frame_color, frame_gray):
-        # reinitializes keypoints for alignment
-        self.first_frame_color, self.first_frame_gray = frame_color, frame_gray
-
-        self.first_frame_key, self.first_frame_desc = self.orb.detectAndCompute(
-            self.first_frame_gray, None)
-
-        #! we thought subtractor reinitialization but it worked bad 
-        #self.foreground_knn = self.initialize_background_subtractor((frame_color, frame_gray))
-
-    def get_mask_of_left_mess(self):
-        # Cut of the left background
-
-        edges = cv2.Canny(cv2.medianBlur(
-            self.empty_board_color, 3), 200, 250, apertureSize=3)
-        linesP = cv2.HoughLinesP(edges, 1, np.pi / 180, 100, None, 400, 20)
-        # line = linesP[0][0]
-        line = np.array([14, 424, 100, 14])
-        bounding_points = np.linspace(
-            line[2]-5, line[3]-5, self.empty_board_color.shape[0]).astype(np.uint8)
-
-        mask = np.ones_like(self.empty_board_gray)
-        for i, boundary in enumerate(bounding_points):
-            mask[i, :boundary] = 0
-
-        self.mask = mask
+        cv2.imshow("mask", self.board_preparator.mask*255)
 
     def update_view(self):
         h = 0
@@ -553,61 +397,38 @@ class CycladesTracker:
     def run(self, video_path):
         # At first processing of the first frame
         video, width, height, fps = utils.get_video(video_path)
-        print(video_path)
 
         first_frame = utils.get_one_frame(video, frame_num=0, current_frame=0)
-        self.get_mask_of_left_mess()
-        self.initialize_first_frame(first_frame)
 
-        current_frame = 0
+        right_part_color, right_part_gray = self.board_preparator.initialize(first_frame)
+
+        self.map_circles = utils.find_circles(right_part_gray, equalize=None, minDist=30, param1=170, param2=20, minRadius=12, maxRadius=25)
+        self.map_circles = self.label_circles(self.map_circles, right_part_color)
+        self.islands = self.detect_islands(right_part_color)
+
+        current_frame_num = 0
         candidates = None
         self.left_candidates = None
         # than processing of later ones withouth unnecessary steps, just updates
         while video.isOpened():
-            video.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
+            video.set(cv2.CAP_PROP_POS_FRAMES, current_frame_num)
             ret, frame = video.read()
 
             if ret:
-                current_frame += 10  # 3fps
-                frame_color, frame_gray = self.preprocess_each_frame(frame)
-                # ! I don't know where exactly this should be done so that grayscale images is warped too... to be discussed
-                frame_color = self.alignImageToFirstFrame(
-                    frame_gray, frame_color)
+                current_frame_num += 10  # 3fps
+                self.left_part_color, left_foreground, self.right_part_color, right_foreground = self.board_preparator.process(frame, current_frame_num)
 
-                self.left_part_color, self.right_part_color = self.separate(
-                    frame_color)
-
-                # ! whether or not blur is usefull is not sure
-                foreground = self.foreground_knn.apply(
-                    cv2.GaussianBlur(frame_color, (3, 3), 0))
-                foreground = cv2.morphologyEx(foreground, cv2.MORPH_OPEN, np.ones(
-                    (7, 7), dtype=np.uint8)) * self.mask  # To filter defined background we multiply by mask
-                # To have only very intense foreground
-                foreground = ((foreground > 200) * 255).astype(np.uint8)
-
-                foreground_left, foreground_right = self.separate(foreground)
-
-                self.analyze_left_part(self.left_part_color, self.left_part_gray, foreground_left)
+                self.analyze_left_part(self.left_part_color, left_foreground)
               
                 self.right_part_color, candidates = self.update_interesting_objects(
-                    foreground_right, self.right_part_color, candidates)
-
-                #! WE reupdate our first frame if we detect some problems with foreground
-                #! This actually may make things even worse if we do this in wrong moment e.g when we have hand on the screen it became background
-                if current_frame % 300 == 0:
-                    print("REINITIALIZE")
-                    # ! gray frame is not warped by default this should be rethought
-                    self.reinitialize_first_frame(
-                        frame_color, cv2.cvtColor(frame_color, cv2.COLOR_BGR2GRAY))
+                    right_foreground, self.right_part_color, candidates)
 
                 #self.right_part = self.draw_circles(self.right_part_color, self.map_circles)
                 self.update_view()
                 #cv2.imshow("left", self.left_part_color)
                 cv2.imshow("right", self.right_part_color)
-                cv2.imshow("game look", np.concatenate(
-                    [self.left_part_color, self.right_part_color], axis=1))
+                cv2.imshow("game look", np.concatenate([self.left_part_color, self.right_part_color], axis=1))
                 #cv2.imshow("foreground", foreground)
-
                 #cv2.imshow("stats", self.stats)
 
                 if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -617,5 +438,6 @@ class CycladesTracker:
 
 
 if __name__ == "__main__":
-    tracker = CycladesTracker(empty_board_path="data/empty_board.jpg")
-    tracker.run("data/cyklady_lvl1_1.mp4")
+    board_preparator = BoardPreparator(empty_board_path="data/empty_board.jpg")
+    tracker = CycladesTracker(board_preparator)
+    tracker.run("data/cyklady_lvl2_1.mp4")
