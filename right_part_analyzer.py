@@ -3,7 +3,9 @@ import numpy as np
 import utils
 
 class RightPartAnalyzer():
-    def __init__(self,):
+    def __init__(self,debug=False):
+        self.debug = debug
+
         self.objects = {}
         self.candidates = {}
 
@@ -11,6 +13,9 @@ class RightPartAnalyzer():
         self.placed = False
         self.waiting_moved = None
         self.waiting_placed = None 
+
+        self.how_much_to_classify_as_object = 3
+
 
     def analyze_map(self, right_part_color, right_part_gray):
         self.map_circles = utils.find_circles(right_part_gray, equalize=None, minDist=30, param1=170, param2=20, minRadius=12, maxRadius=25)
@@ -121,7 +126,9 @@ class RightPartAnalyzer():
 
         for i, obj_box in enumerate(self.objects[name]):
             cutted= utils.cut_obj(frame, obj_box)
-            yellow, black, red = utils.segment_colors(cutted)
+            if self.debug:
+                cv2.imshow("moved?", cutted)
+            yellow, black, red = utils.segment_colors(cutted, debug=self.debug)
             new_color = self.object_color(yellow, black, red)
             if new_color != color:
                 return i
@@ -129,11 +136,15 @@ class RightPartAnalyzer():
         return -1
 
     def process(self, color, foreground, draw_circles = False):
-        color, self.candidates = utils.update_interesting_objects(
-            foreground, color, self.candidates)
+        color, self.candidates, correct_boxes = utils.update_interesting_objects(
+            foreground, color, self.candidates, self.how_much_to_classify_as_object)
 
-        for candidate_box in self.candidates.keys():
+        for candidate_box in correct_boxes:
             self.classify_objects(candidate_box, color)
+
+        if self.debug:
+            cv2.imshow("right_color", color)
+            cv2.imshow("right_fg", foreground)
 
         if draw_circles:
             color= self.draw_circles(color, self.map_circles)
@@ -142,8 +153,13 @@ class RightPartAnalyzer():
 
     def classify_objects(self, box, frame):
         x, y, w, h = box
-        yellow, black, red = utils.segment_colors(frame[y:y+h, x:x+w])
+        cutted = frame[y:y+h, x:x+w]
 
+        if self.debug:
+            cv2.imshow("is_object?", cutted)
+
+        yellow, black, red = utils.segment_colors(cutted, debug=self.debug)
+        
         color = self.object_color(yellow, black, red)
         obj_type = self.object_type(x, y, w, h, frame)
 

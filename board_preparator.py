@@ -3,7 +3,9 @@ import numpy as np
 import utils
 
 class BoardPreparator():
-    def __init__(self, empty_board_path):
+    def __init__(self, empty_board_path, debug=True):
+        self.debug = debug
+        
         self.MAX_FEATURES = 500
         self.GOOD_MATCH_PERCENT = 0.15
         self.orb = cv2.ORB_create(self.MAX_FEATURES)

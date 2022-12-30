@@ -141,11 +141,14 @@ def iou(boxes2,boxes1):
 def calculate_total(w, h):
         return w * h * 255
 
-def segment_colors(frame):
+def segment_colors(frame, debug=False):
     yellow = segment_by_hsv_color(frame, np.array([20, 100, 100]), np.array([30, 255, 255]))
     black = segment_by_hsv_color(frame, np.array([0, 0, 0]), np.array([180, 255, 30]))
     red = segment_by_hsv_color(frame, np.array([0, 100, 100]), np.array([10, 255, 255]))
 
+    if debug:
+        cv2.imshow("segmented_colors", np.concatenate([yellow,black,red], axis=1))
+        cv2.waitKey(0)
     return yellow, black, red
 
 def cut_obj(frame, box):
@@ -164,7 +167,7 @@ def get_sea_mask(frame, label_circles=False):
     else:
         return segment_by_hsv_color(frame, np.array([100, 100, 100]), np.array([140, 255, 255]))
 
-def update_interesting_objects(foreground, frame, candidates, left=False, debug_contours = False):
+def update_interesting_objects(foreground, frame, candidates, being_seen_limit, left=False, debug_contours = False):
         # bases on foreground it updates interesting objects
         cnts, hier = cv2.findContours(
             foreground, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -182,7 +185,7 @@ def update_interesting_objects(foreground, frame, candidates, left=False, debug_
        
         #there is no valid box to be processed further
         if len(boxes) == 0:
-            return frame, candidates
+            return frame, candidates, correct_boxes
 
         if not candidates: # if this is first iteration
             candidates = {tuple(box): 1 for box in boxes}
@@ -197,20 +200,14 @@ def update_interesting_objects(foreground, frame, candidates, left=False, debug_
                 new_candidates[tuple(new[i])] = candidates[old[j]] + 1
                 #! This equality here may be problematic as sometimes more than one box can be matched potentially!
                 # If box was seen for few times we check if it contains an object
-                if new_candidates[tuple(new[i])] == 3:
+                if new_candidates[tuple(new[i])] == being_seen_limit:
                     if debug_contours:
                         cv2.rectangle(frame, (x, y), (x+w, y+h),(255, 0, 0), 2)
 
                     correct_boxes.append(new[i])
-                    box = new[i]
-                    
-                    # if left:
-                    #     self.classify_left_objects(box, frame)
-                    # else:
-                    #     self.classify_right_objects(box, frame)
-                        
+                     
             candidates = new_candidates
-        return frame, candidates
+        return frame, candidates, correct_boxes
 
 def get_font_color(color):
     if color == "yellow":

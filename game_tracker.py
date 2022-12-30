@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import utils
+import argparse
 
 from board_preparator import BoardPreparator
 from left_part_analyzer import LeftPartAnalyzer
@@ -32,11 +33,8 @@ class CycladesTracker:
                 left_part_color = self.left_part_analyzer.process(left_part_color, left_foreground)
                 right_part_color, right_stats = self.right_part_analyzer.process(right_part_color, right_foreground)
 
-                #cv2.imshow("left", self.left_part_color)
-                #cv2.imshow("right", self.right_part_color)
 
                 cv2.imshow("game look", np.concatenate([left_part_color, right_part_color], axis=1))
-                #cv2.imshow("foreground", foreground)
                 cv2.imshow("stats", right_stats)
 
                 if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -46,7 +44,22 @@ class CycladesTracker:
 
 
 if __name__ == "__main__":
-    board_preparator = BoardPreparator(empty_board_path="data/empty_board.jpg")
-    left_part_analyzer = LeftPartAnalyzer(board_preparator)
-    tracker = CycladesTracker(board_preparator, left_part_analyzer)
-    tracker.run("data/cyklady_lvl1_1.mp4")
+    parser = argparse.ArgumentParser(
+                            prog = 'CycladeTracker',
+                            description = 'Program that tracks cyclade board game',
+                            epilog = 'have fun!')
+
+    parser.add_argument('-f','--filename', default="data/cyklady_lvl1_1.mp4", help="path to video")
+    parser.add_argument('-e', "--empty_board_image", default="data/empty_board.jpg", help="path to image of an empty board")
+    parser.add_argument('-db','--debug_board', default=False, help = "Set to True if you want to see debug images of the board")
+    parser.add_argument('-dl','--debug_left', default=False, help = "Set to True if you want to see debug images of the left side ")
+    parser.add_argument('-dr', '--debug_right', default=False, help = "Set to True if you want to see debug images of the right side")
+    
+    args = parser.parse_args()
+
+    board_preparator = BoardPreparator(empty_board_path=args.empty_board_image, debug=args.debug_board)
+    left_part_analyzer = LeftPartAnalyzer(board_preparator,debug=args.debug_left)
+    right_part_analyzer = RightPartAnalyzer(debug = args.debug_right)
+
+    tracker = CycladesTracker(board_preparator, left_part_analyzer, right_part_analyzer)
+    tracker.run(args.filename)
