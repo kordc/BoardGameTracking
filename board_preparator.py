@@ -5,7 +5,7 @@ import utils
 class BoardPreparator():
     def __init__(self, empty_board_path, debug=True):
         self.debug = debug
-        
+
         self.MAX_FEATURES = 500
         self.GOOD_MATCH_PERCENT = 0.15
         self.orb = cv2.ORB_create(self.MAX_FEATURES)
@@ -29,7 +29,7 @@ class BoardPreparator():
         fg_cv2 = cv2.filter2D(frame[:,:,2].astype(g2.dtype), -1, g2)
 
         filtered = (np.maximum(np.zeros_like(fg_cv), fg_cv + fg_cv2) > 20).sum(axis=0)
-        line_x = np.where(filtered > 200)[0][0]
+        line_x = np.where(filtered > 150)[0][0]
 
         return line_x - 10
     

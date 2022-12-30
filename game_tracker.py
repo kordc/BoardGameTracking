@@ -12,16 +12,24 @@ class CycladesTracker:
         self.left_part_analyzer = left_part_analyzer
         self.right_part_analyzer = right_part_analyzer
 
-    def run(self, video_path):
+        
+        self.create_and_move("stats",0,300)
+        self.create_and_move("foreground",500,500)
+        self.create_and_move("game look", 500,0)
+    def create_and_move(self,name, x,y):
+        cv2.namedWindow(name)
+        cv2.moveWindow(name, x,y)
+
+    def run(self, video_path, starting_frame):
         # At first processing of the first frame
         video, width, height, fps = utils.get_video(video_path)
 
-        first_frame = utils.get_one_frame(video, frame_num=0, current_frame=0)
+        first_frame = utils.get_one_frame(video, frame_num=starting_frame, current_frame=starting_frame)
 
         right_part_color, right_part_gray = self.board_preparator.initialize(first_frame)
         self.right_part_analyzer.analyze_map(right_part_color, right_part_gray)
 
-        current_frame_num = 0
+        current_frame_num = starting_frame
         while video.isOpened():
             video.set(cv2.CAP_PROP_POS_FRAMES, current_frame_num)
             ret, frame = video.read()
@@ -34,6 +42,7 @@ class CycladesTracker:
                 right_part_color, right_stats = self.right_part_analyzer.process(right_part_color, right_foreground)
 
 
+                cv2.imshow("foreground", np.concatenate([left_foreground, right_foreground], axis=1))
                 cv2.imshow("game look", np.concatenate([left_part_color, right_part_color], axis=1))
                 cv2.imshow("stats", right_stats)
 
@@ -54,6 +63,7 @@ if __name__ == "__main__":
     parser.add_argument('-db','--debug_board', default=False, help = "Set to True if you want to see debug images of the board")
     parser.add_argument('-dl','--debug_left', default=False, help = "Set to True if you want to see debug images of the left side ")
     parser.add_argument('-dr', '--debug_right', default=False, help = "Set to True if you want to see debug images of the right side")
+    parser.add_argument('-sf', '--starting_frame', default=0, help = "Set starting frame")
     
     args = parser.parse_args()
 
@@ -62,4 +72,4 @@ if __name__ == "__main__":
     right_part_analyzer = RightPartAnalyzer(debug = args.debug_right)
 
     tracker = CycladesTracker(board_preparator, left_part_analyzer, right_part_analyzer)
-    tracker.run(args.filename)
+    tracker.run(args.filename, int(args.starting_frame))

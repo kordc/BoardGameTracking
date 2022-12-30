@@ -175,13 +175,15 @@ def update_interesting_objects(foreground, frame, candidates, being_seen_limit, 
         for cnt in cnts:
             x,y,w,h = cv2.boundingRect(cnt)
 
-            #neglect very small boxes
-            if w*h > 80 and w*h < 12000: 
+            #For debugging purposes
+            # if debug_contours:
+            #     cv2.rectangle(frame,(x,y),(x+w,y+h),(0,255,0),1)
+
+            #neglect very small boxes and also very big
+            if w*h > 80 and w*h < 10000: 
                 boxes.append([x,y,w,h]) # Getting coordinates of every new found box
                 
-                #For debugging purposes
-                if debug_contours:
-                    cv2.rectangle(frame,(x,y),(x+w,y+h),(0,255,0),2)
+               
        
         #there is no valid box to be processed further
         if len(boxes) == 0:
