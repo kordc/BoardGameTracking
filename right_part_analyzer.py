@@ -16,6 +16,9 @@ class RightPartAnalyzer():
 
         self.how_much_to_classify_as_object = 3
 
+        self.cities = {'yellow': 0, 'red': 0, 'black': 0}
+        self.repeat_city_assignment = []
+
 
     def analyze_map(self, right_part_color, right_part_gray):
         self.map_circles = utils.find_circles(right_part_gray, equalize=None, minDist=30, param1=170, param2=20, minRadius=12, maxRadius=25)
@@ -109,13 +112,24 @@ class RightPartAnalyzer():
 
         return obj_type
 
-    def object_color(self, yellow, black, red):
-        if yellow.sum() > yellow.size * 0.8 and yellow.sum() > red.sum() and yellow.sum() > black.sum():
-            return "yellow"
-        elif black.sum() > black.size * 0.8 and black.sum() > red.sum():
-            return "black"
+    def object_color(self, yellow, black, red, blue=None, violet=None, gray=None, orange=None):   
+        if blue is not None and blue.sum() > yellow.sum() and blue.sum() > black.sum() and blue.sum() > red.sum():
+            if blue.sum() > violet.sum() and blue.sum() > gray.sum() and blue.sum() > orange.sum():
+                return "blue"
+        if gray is not None and gray.sum() > yellow.sum() and gray.sum() > black.sum() and gray.sum() > red.sum():
+            if gray.sum() > blue.sum() and gray.sum() > violet.sum() and gray.sum() > orange.sum() and gray.sum() > gray.size * 0.9:
+                return "gray"
+        if orange is not None and orange.sum() > yellow.sum() and orange.sum() > black.sum() and orange.sum() > red.sum():
+            if orange.sum() > blue.sum() and orange.sum() > violet.sum() and orange.sum() > gray.sum() and orange.sum() > orange.size * 0.9:
+                return "orange"
+        if violet is not None and violet.sum() > black.sum():
+            return "violet"
         elif red.sum() > red.size * 0.8:
             return "red"
+        elif yellow.sum() > yellow.size * 0.8 and yellow.sum() > black.sum():
+            return "yellow"
+        elif black.sum() > black.size * 0.8:
+            return "black"
         else:
             return "unknown"
 
@@ -131,6 +145,7 @@ class RightPartAnalyzer():
             yellow, black, red = utils.segment_colors(cutted, debug=self.debug)
             new_color = self.object_color(yellow, black, red)
             if new_color != color:
+                print(color, new_color)
                 return i
 
         return -1
@@ -150,7 +165,29 @@ class RightPartAnalyzer():
             color= self.draw_circles(color, self.map_circles)
 
         return self.update_view(color)
-
+   
+    def city_island_mapping(self, x, y, w, h, frame):
+        current_island = self.detect_current_island(x, y, w, h, frame)
+        if current_island is not None:
+            xr, yr, wr, hr = cv2.boundingRect(current_island[0])
+            if len(self.islands[(xr, yr, wr, hr)]) > 1:
+                owner = self.islands[(xr, yr, wr, hr)][1]
+                self.cities[owner] += 1
+            else:
+                self.repeat_city_assignment.append([xr, yr, wr, hr, frame])
+    
+    def island_object_mapping(self, x, y, w, h, frame, color):
+        current_island = self.detect_current_island(x, y, w, h, frame)
+        if current_island is not None:
+            ellipse = cv2.fitEllipse(current_island[0])
+            xr, yr, wr, hr = cv2.boundingRect(current_island[0])
+            new_owner = False
+            if len(self.islands[(xr, yr, wr, hr)]) > 1:
+                if self.islands[(xr, yr, wr, hr)][1] != color:
+                    new_owner = True
+            self.islands[(xr, yr, wr, hr)] = [
+                current_island[0], color, ellipse, new_owner]
+    
     def classify_objects(self, box, frame):
         x, y, w, h = box
         cutted = frame[y:y+h, x:x+w]
@@ -159,10 +196,15 @@ class RightPartAnalyzer():
             cv2.imshow("is_object?", cutted)
 
         yellow, black, red = utils.segment_colors(cutted, debug=self.debug)
-        
-        color = self.object_color(yellow, black, red)
-        obj_type = self.object_type(x, y, w, h, frame)
+        blue, violet, gray, orange = utils.segment_colors_cities(cutted)
 
+        color = self.object_color(
+            yellow, black, red, blue, violet, gray, orange)
+        obj_type = self.object_type(x, y, w, h, frame)
+        if color in ['blue', 'violet', 'gray', 'orange']:
+            if w*h<350 or  obj_type != 'warrior':
+                return
+            obj_type = 'city'
         name = color + " " + obj_type
 
         if "unknown" in name or w*h > 1000 or w*h < 150: #! Filter too big or too small objects
@@ -176,21 +218,11 @@ class RightPartAnalyzer():
                 four = abs(coords[3] - h) < 10
                 if one and two and three and four:
                     return
-
         
         if obj_type == "warrior":
-            current_island = self.detect_current_island(x, y, w, h, frame)
-            if current_island is not None:
-                ellipse = cv2.fitEllipse(current_island[0])
-                xr, yr, wr, hr = cv2.boundingRect(current_island[0])
-                new_owner = False
-                if len(self.islands[(xr, yr, wr, hr)]) > 1:
-                    if self.islands[(xr, yr, wr, hr)][1] != color:
-                        new_owner = True
-                self.islands[(xr, yr, wr, hr)] = [
-                    current_island[0], color, ellipse, new_owner]
+            self.island_object_mapping(x, y, w, h, frame, color)
 
-        if self.is_moved(name, frame) != -1:
+        if obj_type != 'city' and self.is_moved(name, frame) != -1:
             self.objects[name].pop(self.is_moved(name,frame))
             self.moved = True
 
@@ -201,6 +233,12 @@ class RightPartAnalyzer():
             self.objects[name].append([x, y, w, h])
             self.placed = True
 
+        if obj_type == "city":
+            self.city_island_mapping(x, y, w, h, frame)
+        for i in range(len(self.repeat_city_assignment)):
+            params = self.repeat_city_assignment[i]
+            self.city_island_mapping(params[0], params[1], params[2], params[3], params[4])
+            self.repeat_city_assignment.pop(i)
 
     def update_view(self, frame):
         h = 0
@@ -216,6 +254,8 @@ class RightPartAnalyzer():
         color_islands = {'red': 0, 'black': 0, 'yellow': 0}
         for island in self.islands.values():
             if len(island) > 1:
+                if island[1] in ['blue', 'violet', 'gray', 'orange']:
+                    continue
                 color_islands[island[1]] += 1
         for color, cnt in color_islands.items():
             cv2.putText(right_stats, color + " islands: " + str(cnt), (20,
@@ -234,6 +274,11 @@ class RightPartAnalyzer():
         cv2.putText(right_stats, "moved_counter: " + str(self.moved), (20,
                                                                    20 + 20 * h), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
         h += 1
+
+        for owner, cnt in self.cities.items():
+            cv2.putText(right_stats, owner + " cities: " + str(cnt), (20,
+                                                                      20 + 20 * h), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            h += 1
 
         for island, stats in self.islands.items():
             if len(stats) <= 1:

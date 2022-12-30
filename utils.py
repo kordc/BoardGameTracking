@@ -151,6 +151,13 @@ def segment_colors(frame, debug=False):
         cv2.waitKey(0)
     return yellow, black, red
 
+def segment_colors_cities(frame):
+    blue = segment_by_hsv_color(frame, np.array([90, 50, 50]), np.array([110, 255, 255]))
+    purple = segment_by_hsv_color(frame, np.array([130, 50, 50]), np.array([150, 255, 255]))
+    white = segment_by_hsv_color(frame, np.array([0, 0, 200]), np.array([180, 30, 255]))
+    orange = segment_by_hsv_color(frame, np.array([10, 100, 100]), np.array([20, 255, 255]))
+    return blue, purple, white, orange
+
 def cut_obj(frame, box):
     x, y, w, h = box
     return frame[y:y+h, x:x+w]
@@ -218,6 +225,14 @@ def get_font_color(color):
         font_color = (0, 0, 0)
     elif color == "red":
         font_color = (0, 0, 255)
+    elif color == 'blue':
+        font_color = (255, 0, 0)
+    elif color == 'violet':
+        font_color = (255, 0, 255)
+    elif color == 'gray':
+        font_color = (128, 128, 128)
+    elif color == 'orange':
+        font_color = (0, 165, 255)
     else:
         font_color = (255, 255, 255)
     return font_color
