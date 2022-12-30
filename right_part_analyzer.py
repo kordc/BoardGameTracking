@@ -145,7 +145,6 @@ class RightPartAnalyzer():
             yellow, black, red = utils.segment_colors(cutted, debug=self.debug)
             new_color = self.object_color(yellow, black, red)
             if new_color != color:
-                print(color, new_color)
                 return i
 
         return -1
