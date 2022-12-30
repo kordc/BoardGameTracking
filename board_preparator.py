@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import utils
 
+
 class BoardPreparator():
     def __init__(self, empty_board_path, debug=True):
         self.debug = debug
@@ -25,17 +26,18 @@ class BoardPreparator():
         fg_cv = cv2.filter2D(frame[:, :, 0], -1, g)
         fg_cv2 = cv2.filter2D(frame[:, :, 2].astype(g2.dtype), -1, g2)
 
-        fg_cv = cv2.filter2D(frame[:,:,0], -1, g)
-        fg_cv2 = cv2.filter2D(frame[:,:,2].astype(g2.dtype), -1, g2)
+        fg_cv = cv2.filter2D(frame[:, :, 0], -1, g)
+        fg_cv2 = cv2.filter2D(frame[:, :, 2].astype(g2.dtype), -1, g2)
 
-        filtered = (np.maximum(np.zeros_like(fg_cv), fg_cv + fg_cv2) > 20).sum(axis=0)
-        
-       
+        filtered = (np.maximum(np.zeros_like(fg_cv),
+                    fg_cv + fg_cv2) > 20).sum(axis=0)
+
         line_x = np.where(filtered > 150)[0][0]
 
         return line_x - 10
-    
+
     def equalize_color_image(self, frame):
+        # equalize color image
         lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
         lab_planes = np.array(cv2.split(lab))
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(3, 3))
@@ -102,6 +104,7 @@ class BoardPreparator():
         return im1Reg
 
     def initialize_background_subtractor(self, images=None):
+        # initialize background KNN subtractor with empty board
         foreground_knn = cv2.createBackgroundSubtractorKNN()
 
         if images is None:  # ! First every initialization
@@ -116,6 +119,7 @@ class BoardPreparator():
         return foreground_knn
 
     def initialize_first_frame(self, first_frame):
+        # initialize first frame, keypoints and separate it into two parts
         self.first_frame_color, self.first_frame_gray = self.preprocess_each_frame(
             first_frame)
         self.height, self.width = self.first_frame_gray.shape
@@ -123,7 +127,8 @@ class BoardPreparator():
         self.first_frame_key, self.first_frame_desc = self.orb.detectAndCompute(
             self.first_frame_gray, None)
 
-        self.intersecting_line_x = self.find_separating_line(self.first_frame_color)
+        self.intersecting_line_x = self.find_separating_line(
+            self.first_frame_color)
 
         self.foreground_knn = self.initialize_background_subtractor()
 
@@ -131,7 +136,6 @@ class BoardPreparator():
             self.first_frame_color)
         left_part_gray, right_part_gray = self.separate(
             self.first_frame_gray)
-
 
         return right_part_color, right_part_gray
 
@@ -142,7 +146,7 @@ class BoardPreparator():
         self.first_frame_key, self.first_frame_desc = self.orb.detectAndCompute(
             self.first_frame_gray, None)
 
-        #! we thought about subtractor reinitialization but it worked bad 
+        #! we thought about subtractor reinitialization but it worked bad
         #self.foreground_knn = self.initialize_background_subtractor((frame_color, frame_gray))
 
     def get_mask_of_left_mess(self):
@@ -152,8 +156,9 @@ class BoardPreparator():
         linesP = cv2.HoughLinesP(edges, 1, np.pi / 180, 100, None, 400, 20)
         if linesP is not None:
             line = linesP[0][0]
-        else: #! We have very strange problem that we used the same image and same opencv version and on one PC it was working and on other not.
-            line = np.array([14, 424, 100, 14]) #! still this is always the same image.
+        else:  # ! We have very strange problem that we used the same image and same opencv version and on one PC it was working and on other not.
+            # ! still this is always the same image.
+            line = np.array([14, 424, 100, 14])
         bounding_points = np.linspace(
             line[2]-5, line[3]-5, self.empty_board_color.shape[0]).astype(np.uint8)
 
@@ -164,11 +169,14 @@ class BoardPreparator():
         self.mask = mask
 
     def zero_mask(self, box):
-        x,y,w,h = box
+        # Zero mask in the box
+        x, y, w, h = box
         self.mask[y:y+h, x:x+w] = 0
 
     def get_foreground(self, frame_color):
-        foreground = self.foreground_knn.apply(cv2.GaussianBlur(frame_color, (3, 3), 0))
+        # Get foreground
+        foreground = self.foreground_knn.apply(
+            cv2.GaussianBlur(frame_color, (3, 3), 0))
         foreground = cv2.morphologyEx(foreground, cv2.MORPH_OPEN, np.ones(
             (7, 7), dtype=np.uint8)) * self.mask  # To filter defined background we multiply by mask
 
@@ -177,6 +185,7 @@ class BoardPreparator():
         return self.separate(foreground)
 
     def process(self, frame, current_frame):
+        # This is the main function that is called for start
         frame_color, frame_gray = self.preprocess_each_frame(frame)
 
         frame_color = self.alignImageToFirstFrame(frame_gray, frame_color)
@@ -184,12 +193,14 @@ class BoardPreparator():
         left_part_color, right_part_color = self.separate(frame_color)
 
         left_foreground, right_foreground = self.get_foreground(frame_color)
-        
+
         if current_frame % 300 == 0:
-            self.reinitialize_first_frame(frame_color, cv2.cvtColor(frame_color, cv2.COLOR_BGR2GRAY))
+            self.reinitialize_first_frame(
+                frame_color, cv2.cvtColor(frame_color, cv2.COLOR_BGR2GRAY))
 
         return left_part_color, left_foreground, right_part_color, right_foreground
 
     def initialize(self, first_frame):
+        # This function is called only once at the beginning
         self.get_mask_of_left_mess()
         return self.initialize_first_frame(first_frame)
