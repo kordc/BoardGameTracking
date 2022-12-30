@@ -33,3 +33,4 @@ game_tracker.py -f=data/cyklady_lvl4_5.mp4  -dr=True -dl=True
 To run this in debugging mode
 
 And you should see something like that:
+![board](data/game_view.png?raw=true "Game view")
