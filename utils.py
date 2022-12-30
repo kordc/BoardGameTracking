@@ -200,7 +200,7 @@ def update_interesting_objects(foreground, frame, candidates, being_seen_limit, 
                 i,j = match
                 #If there is a match we increase counter of old candidate by 1
                 new_candidates[tuple(new[i])] = candidates[old[j]] + 1
-                #! This equality here may be problematic as sometimes more than one box can be matched potentially!
+                #! This equality here may be problematic as sometimes more than one box can be matched!
                 # If box was seen for few times we check if it contains an object
                 if new_candidates[tuple(new[i])] == being_seen_limit:
                     if debug_contours:

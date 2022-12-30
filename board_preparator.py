@@ -29,6 +29,8 @@ class BoardPreparator():
         fg_cv2 = cv2.filter2D(frame[:,:,2].astype(g2.dtype), -1, g2)
 
         filtered = (np.maximum(np.zeros_like(fg_cv), fg_cv + fg_cv2) > 20).sum(axis=0)
+        
+       
         line_x = np.where(filtered > 150)[0][0]
 
         return line_x - 10
@@ -105,7 +107,7 @@ class BoardPreparator():
         if images is None:  # ! First every initialization
             empty_board_color = self.alignImageToFirstFrame(
                 self.empty_board_gray, self.empty_board_color)
-        else:  # ! reinitialization, but not used
+        else:  # ! reinitialization, but not used, it performed worse
             empty_board_color, empty_board_gray = images
 
         for i in range(10):
@@ -151,7 +153,7 @@ class BoardPreparator():
         if linesP is not None:
             line = linesP[0][0]
         else: #! We have very strange problem that we used the same image and same opencv version and on one PC it was working and on other not.
-            line = np.array([14, 424, 100, 14])
+            line = np.array([14, 424, 100, 14]) #! still this is always the same image.
         bounding_points = np.linspace(
             line[2]-5, line[3]-5, self.empty_board_color.shape[0]).astype(np.uint8)
 

@@ -33,7 +33,6 @@ class CycladesTracker:
         while video.isOpened():
             video.set(cv2.CAP_PROP_POS_FRAMES, current_frame_num)
             ret, frame = video.read()
-
             if ret:
                 current_frame_num += 10  # 3fps
                 left_part_color, left_foreground, right_part_color, right_foreground = self.board_preparator.process(frame, current_frame_num)
@@ -45,7 +44,7 @@ class CycladesTracker:
                 cv2.imshow("foreground", np.concatenate([left_foreground, right_foreground], axis=1))
                 cv2.imshow("game look", np.concatenate([left_part_color, right_part_color], axis=1))
                 cv2.imshow("stats", right_stats)
-
+               
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
             else:

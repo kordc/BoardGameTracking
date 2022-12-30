@@ -52,7 +52,7 @@ class RightPartAnalyzer():
             elif sea_ratio > 0.7:
                 labeled_circles.append((circle, "sea"))
                 self.segmented_right_part[y1:y2, x1:x2] = (255, 0, 0)
-
+       
         return labeled_circles
 
     def draw_circles(self, frame, labeled_circles):
