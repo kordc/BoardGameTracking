@@ -212,3 +212,13 @@ def update_interesting_objects(foreground, frame, candidates, left=False, debug_
             candidates = new_candidates
         return frame, candidates
 
+def get_font_color(color):
+    if color == "yellow":
+        font_color = (0, 255, 255)
+    elif color == "black":
+        font_color = (0, 0, 0)
+    elif color == "red":
+        font_color = (0, 0, 255)
+    else:
+        font_color = (255, 255, 255)
+    return font_color
