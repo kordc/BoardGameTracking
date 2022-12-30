@@ -17,10 +17,18 @@ class CycladesTracker:
         self.orb = cv2.ORB_create(self.MAX_FEATURES)
 
         self.objects = {}
+        self.left_objects = {}
         self.moved = False
         self.placed = False
         self.waiting_moved = None
         self.waiting_placed = None
+
+        self.gods_colors = {
+            "athena": [np.array([0,0,180]), np.array([180,50,255])], 
+            "ares": [np.array([0, 50, 100]), np.array([20, 255, 255])], 
+            "poseidon": [np.array([90, 50, 150]), np.array([100, 255, 255])], 
+            "zeus": [np.array([110, 50, 150]), np.array([120, 255, 255])],
+        }
 
     def find_separating_line(self, frame):
         # Find point dividing left and right part of the board
@@ -63,13 +71,23 @@ class CycladesTracker:
 
         frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        # if self.equalize == "global":
-        #     frame_gray = cv2.equalizeHist(frame_gray)
-        # elif self.equalize == "local":
-        #     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-        #     frame_gray = clahe.apply(frame_gray)
-
         return frame, frame_gray
+
+    def get_land_mask(self, frame, label_circles=False):
+        if label_circles:
+            return utils.segment_by_hsv_color(frame, np.array([10, 50, 50]), np.array([49, 255, 255]))
+        else:
+            return utils.segment_by_hsv_color(frame, np.array([50, 50, 50]), np.array([70, 255, 255]))
+    
+
+    def get_sea_mask(self, frame, label_circles=False):
+        if label_circles:
+            return utils.segment_by_hsv_color(frame, np.array([50, 50, 50]), np.array([110, 255, 255]))
+        else:
+            return utils.segment_by_hsv_color(frame, np.array([100, 100, 100]), np.array([140, 255, 255]))
+
+    def calculate_total(self, w, h):
+        return w* h * 255
 
     def label_circles(self, circles, frame):
         # label circles with sea or land
@@ -88,12 +106,10 @@ class CycladesTracker:
 
             place = frame[y1:y2, x1:x2]
 
-            sea_mask = utils.segment_by_hsv_color(
-                place, np.array([50, 50, 50]), np.array([110, 255, 255]))
-            land_mask = utils.segment_by_hsv_color(
-                place, np.array([10, 50, 50]), np.array([49, 255, 255]))
+            sea_mask = self.get_sea_mask(place, label_circles=True)
+            land_mask = self.get_land_mask(place, label_circles=True)
 
-            total = (x2-x1) * (y2-y1) * 255
+            total = self.calculate_total(x2-x1, y2-y1)
             sea_ratio = np.sum(sea_mask) / total
             land_ratio = np.sum(land_mask) / total
 
@@ -123,8 +139,7 @@ class CycladesTracker:
         return frame
 
     def detect_islands(self, frame):
-        land_mask = utils.segment_by_hsv_color(
-            self.segmented_right_part, np.array([50, 50, 50]), np.array([70, 255, 255]))
+        land_mask = self.get_land_mask(self.segmented_right_part)
         land_mask = cv2.erode(land_mask, np.ones((3, 3)), iterations=1)
         land_mask = cv2.dilate(land_mask, np.ones((3, 3)), iterations=6)
         cnts, hier = cv2.findContours(
@@ -146,14 +161,10 @@ class CycladesTracker:
         return None
 
     def object_type(self, x, y, w, h, frame):
-        sea_mask = utils.segment_by_hsv_color(
-            self.segmented_right_part[y:y+h, x:x+w], np.array([100, 100, 100]), np.array([140, 255, 255]))
-        land_mask = utils.segment_by_hsv_color(
-            self.segmented_right_part[y:y+h, x:x+w], np.array([50, 50, 50]), np.array([70, 255, 255]))
-        # sea_mask = self.segmented_right_part[y:y+h, x:x+w,0] == 255
-        # land_mask = self.segmented_right_part[y:y+h, x:x+w,1] == 255
-
-        total = w * h * 255
+        sea_mask = self.get_sea_mask(self.segmented_right_part[y:y+h, x:x+w])
+        land_mask = self.get_land_mask(self.segmented_right_part[y:y+h, x:x+w])
+    
+        total = self.calculate_total(w,h)
         sea_ratio = np.sum(sea_mask) / total
         land_ratio = np.sum(land_mask) / total
 
@@ -168,9 +179,9 @@ class CycladesTracker:
     def object_color(self, yellow, black, red):
         if yellow.sum() > yellow.size * 0.8 and yellow.sum() > red.sum() and yellow.sum() > black.sum():
             return "yellow"
-        elif black.sum() > black.size * 0.8 and black.sum() > red.sum() and black.sum() > yellow.sum():
+        elif black.sum() > black.size * 0.8 and black.sum() > red.sum():
             return "black"
-        elif red.sum() > red.size * 0.8 and red.sum() > yellow.sum() and red.sum() > black.sum():
+        elif red.sum() > red.size * 0.8:
             return "red"
         else:
             return "unknown"
@@ -186,37 +197,41 @@ class CycladesTracker:
             font_color = (255, 255, 255)
         return font_color
 
+    def segment_colors(self, frame):
+        yellow = utils.segment_by_hsv_color(frame, np.array([20, 100, 100]), np.array([30, 255, 255]))
+        black = utils.segment_by_hsv_color(frame, np.array([0, 0, 0]), np.array([180, 255, 30]))
+        red = utils.segment_by_hsv_color(frame, np.array([0, 100, 100]), np.array([10, 255, 255]))
+
+        return yellow, black, red
+
+    def cut_obj(self, frame, box):
+        x, y, w, h = box
+        return frame[y:y+h, x:x+w]
+
     def is_moved(self, name):
         color = name.split(" ")[0]
-        if name not in self.objects.keys():
+        if name not in self.objects.keys(): 
             return -1
-        for i, obj in enumerate(self.objects[name]):
-            x, y, w, h = obj
-            mask = None
-            yellow = utils.segment_by_hsv_color(
-                self.right_part_color[y:y+h, x:x+w], np.array([20, 100, 100]), np.array([30, 255, 255]))
-            black = utils.segment_by_hsv_color(
-                self.right_part_color[y:y+h, x:x+w], np.array([0, 0, 0]), np.array([180, 255, 30]))
-            red = utils.segment_by_hsv_color(
-                self.right_part_color[y:y+h, x:x+w], np.array([0, 100, 100]), np.array([10, 255, 255]))
+
+        for i, obj_box in enumerate(self.objects[name]):
+            cutted= self.cut_obj(self.right_part_color, obj_box)
+            yellow, black, red = self.segment_colors(cutted)
             new_color = self.object_color(yellow, black, red)
             if new_color != color:
                 return i
+
         return -1
 
-    def classify_right_objects(self, x, y, w, h, frame):
-        yellow = utils.segment_by_hsv_color(
-            frame[y:y+h, x:x+w], np.array([20, 100, 100]), np.array([30, 255, 255]))
-        black = utils.segment_by_hsv_color(
-            frame[y:y+h, x:x+w], np.array([0, 0, 0]), np.array([180, 255, 30]))
-        red = utils.segment_by_hsv_color(
-            frame[y:y+h, x:x+w], np.array([0, 100, 100]), np.array([10, 255, 255]))
+    def classify_right_objects(self, box, frame):
+        x, y, w, h = box
+        yellow, black, red = self.segment_colors(self.right_part_color[y:y+h, x:x+w])
 
         color = self.object_color(yellow, black, red)
         obj_type = self.object_type(x, y, w, h, frame)
+
         name = color + " " + obj_type
 
-        if "unknown" in name or w*h > 1000 or w*h < 150:
+        if "unknown" in name or w*h > 1000 or w*h < 150: #! Filter too big or too small objects
             return
 
         if name in self.objects.keys():
@@ -240,6 +255,7 @@ class CycladesTracker:
                         new_owner = True
                 self.islands[(xr, yr, wr, hr)] = [
                     current_island[0], color, ellipse, new_owner]
+
         if self.is_moved(name) != -1:
             self.objects[name].pop(self.is_moved(name))
             self.moved = True
@@ -251,130 +267,115 @@ class CycladesTracker:
             self.objects[name].append([x, y, w, h])
             self.placed = True
 
-    def update_interesting_objects(self, foreground, frame, candidates, left=False):
+    def update_interesting_objects(self, foreground, frame, candidates, left=False, debug_contours = False):
         # bases on foreground it updates interesting objects
         cnts, hier = cv2.findContours(
             foreground, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        boxes, correct_boxes = [], []
+        boxes, correct_boxes = [], [] # boxes found and boxes containing actual object
         for cnt in cnts:
             x,y,w,h = cv2.boundingRect(cnt)
-            if w*h > 80 and w*h < 12000: #! neglect very small boxes
+
+            #neglect very small boxes
+            if w*h > 80 and w*h < 12000: 
                 boxes.append([x,y,w,h]) # Getting coordinates of every new found box
-                area = cv2.contourArea(cnt)
-            
-                #cv2.rectangle(frame,(x,y),(x+w,y+h),(0,255,0),2)
-                #cv2.putText(frame, str(area), (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-            # _ = self.classify_objects(x, y, w, h, frame)
-        
+                
+                #For debugging purposes
+                if debug_contours:
+                    cv2.rectangle(frame,(x,y),(x+w,y+h),(0,255,0),2)
+       
+        #there is no valid box to be processed further
         if len(boxes) == 0:
             return frame, candidates
-
-        # if w*h > 5000:
-        #     self.mask[y:y+h, x:x+w] = 0
-        #     cv2.rectangle(frame,(x,y),(x+w,y+h),(255,0,0),2)
-        #     cv2.putText(frame, str(w*h), (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
         if not candidates: # if this is first iteration
             candidates = {tuple(box): 1 for box in boxes}
         else:
             old = list(candidates.keys()) #previous candidates
             new = boxes # currently found boxes
-            matches = utils.centres_within(np.array(old), np.array(new)) # which box match to whom
+            matches = utils.centres_within(np.array(old), np.array(new)) # which old box match to which new box
             new_candidates = {tuple(box): 1 for box in boxes}
             for match in matches: # Box ith from previous iteration matched to jth from this iteration
                 i,j = match
-                #! some matching by area should be done!
+                #If there is a match we increase counter of old candidate by 1
                 new_candidates[tuple(new[i])] = candidates[old[j]] + 1
                 #! This equality here may be problematic as sometimes more than one box can be matched potentially!
-                if new_candidates[tuple(new[i])] == 3: #! If box was seen twice in the same place we track it, consider equality here
-                    # area = cv2.contourArea(cnt)
-                    # if area > 100:
-                    #cv2.rectangle(frame,(x,y),(x+w,y+h),(255,0,0),2)
-                    #     cv2.putText(frame, str(area), (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                # If box was seen for few times we check if it contains an object
+                if new_candidates[tuple(new[i])] == 3:
+                    if debug_contours:
+                        cv2.rectangle(frame, (x, y), (x+w, y+h),(255, 0, 0), 2)
 
-                   
                     correct_boxes.append(new[i])
-                    x,y,w,h = new[i]
+                    box = new[i]
                     if left:
-                        self.classify_left_objects(x, y, w, h, frame)
+                        self.classify_left_objects(box, frame)
                     else:
-                        self.classify_right_objects(x, y, w, h, frame)
-                            #cv2.rectangle(frame, (x, y), (x+w, y+h),
-                            #             (255, 0, 0), 2)
+                        self.classify_right_objects(box, frame)
+                        
             candidates = new_candidates
         return frame, candidates
 
-    def classify_pawn_by_color(self, x,y,w,h,frame):
-        yellow = utils.segment_by_hsv_color(frame[y:y+h, x:x+w], np.array([20, 130, 130]), np.array([30, 255, 255]))
-        black = utils.segment_by_hsv_color(frame[y:y+h, x:x+w], np.array([0, 0, 0]), np.array([180, 255, 30]))
-        red = utils.segment_by_hsv_color(frame[y:y+h, x:x+w], np.array([0, 100, 100]), np.array([10, 255, 255]))
-        total = w * h * 255
+    def classify_pawn_by_color(self, frame):
+        yellow, black, red = self.segment_colors(frame)
+
+        w,h, _ = frame.shape
+        total = self.calculate_total(w,h)
         if w * h < 400:
             if yellow.sum() / total > 0.3:
                 return "yellow"
-            if red.sum() / total > 0.4:
+            elif red.sum() / total > 0.4:
                 return "red"
-            if black.sum() / total > 0.4:
+            elif black.sum() / total > 0.4:
                 return "black"
+            
 
-    def classify_gods(self, x,y,w,h,frame):
-        gods_colors = {
-            "athena": [np.array([0,0,180]), np.array([180,50,255])], 
-            "ares": [np.array([0, 50, 100]), np.array([20, 255, 255])], 
-            "poseidon": [np.array([90, 50, 150]), np.array([100, 255, 255])], 
-            "zeus": [np.array([110, 50, 150]), np.array([120, 255, 255])],
-        }
+    def get_most_possible_god(self, cutted, total):
         ratios = []
-        if w*h > 5000:
-            total = w * h * 255
-            for name, color in gods_colors.items():
-                mask = utils.segment_by_hsv_color(frame[y:y+h, x:x+w], color[0], color[1])
+        for name, color in self.gods_colors.items():
+                mask = utils.segment_by_hsv_color(cutted, color[0], color[1])
                 cv2.imshow("mask", mask)
                 cv2.waitKey(0)
                 ratios.append(mask.sum() / total)
 
-            max_god = np.argmax(ratios)
-            if ratios[max_god] > 0.1:
-                return list(gods_colors.keys())[max_god]
-    
+        max_god = np.argmax(ratios)
+        if ratios[max_god] > 0.1:
+            return list(self.gods_colors.keys())[max_god]
 
-    def classify_cards(self, x,y,w,h,frame):
+    def classify_gods(self, frame):
+        w,h, _ = frame.shape
+        if w*h > 5000:
+            total = self.calculate_total(w,h)
+            god = self.get_most_possible_god(frame, total)
+            return god
+
+    def classify_cards(self, frame):
+        w,h, _ = frame.shape
         if w*h > 1500 and w*h < 3000:
             return "card"
-                
-    def classify_left_objects(self, x, y, w, h, frame):
-        cv2.imshow("to be detected",frame[y:y+h, x:x+w])
-        cv2.waitKey(0)
-        decision = self.classify_pawn_by_color(x,y,w,h,frame)
+
+    def verify_decision(self, box, decision, frame):
+        x,y,w,h = box
         if decision:
-            self.mask[y:y+h, x:x+w] = 0
             cv2.putText(frame, decision, (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
               
             cv2.imshow("detection", frame)
             cv2.waitKey(0)
 
-            if w*h > 5000:
-                self.mask[y:y+h, x:x+w] = 0
-
-        decision = self.classify_gods(x,y,w,h,frame)
+    def check_decision(self, decision, box, frame):
         if decision:
+            x,y,w,h = box
             self.mask[y:y+h, x:x+w] = 0
-            cv2.putText(frame, decision, (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-            
+            self.left_objects[decision] = box
             cv2.imshow("detection", frame)
             cv2.waitKey(0)
 
-            if w*h > 5000:
-                self.mask[y:y+h, x:x+w] = 0
+    def classify_left_objects(self, box, frame):
+        cutted = self.cut_obj(frame,box)
+        # cv2.imshow("to be detected", cutted)
+        # cv2.waitKey(0)
+        self.check_decision(self.classify_pawn_by_color(cutted),box,frame)
+        self.check_decision(self.classify_gods(cutted),box,frame)
+        self.check_decision(self.classify_cards(cutted),box,frame)
         
-        decision = self.classify_cards(x,y,w,h,frame)
-        if decision:
-            self.mask[y:y+h, x:x+w] = 0
-            cv2.putText(frame, decision, (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-            
-            cv2.imshow("detection", frame)
-            cv2.waitKey(0)
-
 
     def alignImageToFirstFrame(self, im_gray, im_color):
         # Detect ORB features and compute descriptors.
@@ -446,7 +447,6 @@ class CycladesTracker:
             self.first_frame_gray, None)
 
         self.intersecting_line_x = self.find_separating_line(self.first_frame_color)
-        #self.intersecting_line_x = 300
 
         self.left_part_color, self.right_part_color = self.separate(
             self.first_frame_color)
@@ -457,16 +457,19 @@ class CycladesTracker:
             self.right_part_gray, equalize=None, minDist=30, param1=170, param2=20, minRadius=12, maxRadius=25)
         self.map_circles = self.label_circles(
             self.map_circles, self.right_part_color)
+
         self.foreground_knn = self.initialize_background_subtractor()
+
         self.islands = self.detect_islands(self.right_part_color)
 
     def reinitialize_first_frame(self, frame_color, frame_gray):
-        # reinitializes mask for alignment
+        # reinitializes keypoints for alignment
         self.first_frame_color, self.first_frame_gray = frame_color, frame_gray
 
         self.first_frame_key, self.first_frame_desc = self.orb.detectAndCompute(
             self.first_frame_gray, None)
 
+        #! we thought subtractor reinitialization but it worked bad 
         #self.foreground_knn = self.initialize_background_subtractor((frame_color, frame_gray))
 
     def get_mask_of_left_mess(self):
@@ -539,6 +542,13 @@ class CycladesTracker:
                               (x + w, y + h), self.get_font_color(color), 2)
                 cv2.putText(self.right_part_color, obj_type, (x, y),
                             cv2.FONT_HERSHEY_SIMPLEX, 1, self.get_font_color(color), 2)
+        
+        for object in self.left_objects.keys():
+            x,y,w,h = self.left_objects[object]
+            cv2.rectangle(self.left_part_color, (x, y),
+                              (x + w, y + h), (0,255,0), 2)
+            cv2.putText(self.left_part_color, object, (x, y),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
 
     def run(self, video_path):
         # At first processing of the first frame
@@ -593,7 +603,7 @@ class CycladesTracker:
                 #self.right_part = self.draw_circles(self.right_part_color, self.map_circles)
                 self.update_view()
                 #cv2.imshow("left", self.left_part_color)
-                #cv2.imshow("right", self.right_part_color)
+                cv2.imshow("right", self.right_part_color)
                 cv2.imshow("game look", np.concatenate(
                     [self.left_part_color, self.right_part_color], axis=1))
                 #cv2.imshow("foreground", foreground)
