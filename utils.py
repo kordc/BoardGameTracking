@@ -98,17 +98,43 @@ def segment_by_hsv_color(frame, lower, upper, plot_colors=False):
 def calculate_means(boxes):
     #calculates center of the bounding boxes
     return [boxes[:, 0] + boxes[:,2]//2], [boxes[:, 1] + boxes[:,3]//2]
-     
-def centres_within(boxes1, boxes2, sigma = 10):
+
+def calculate_area(boxes):
+    return [boxes[:,2] * boxes[:,3]]
+
+def centres_within(boxes1, boxes2, sigma_center = 10, sigma_area = 100):
     #This calculates if centres of boxes are withing some threshold
     xc1, yc1 = calculate_means(boxes1)
     xc2, yc2 = calculate_means(boxes2)
 
     x_diff = np.abs(xc1 - np.transpose(xc2))
     y_diff = np.abs(yc1 - np.transpose(yc2))
-
-    total_diff = x_diff + y_diff
     
-    similar = np.argwhere(total_diff < sigma)
+    center_diff = x_diff + y_diff
+
+    #area_diff = np.abs(calculate_area(boxes1) - np.transpose(calculate_area(boxes2))) #! not checked
+    
+    similar = np.argwhere((center_diff < sigma_center)) #& (area_diff < sigma_area))
     return similar
+
+def get_boxes(boxes):
+    x11, y11, w, h = np.split(boxes, 4, axis=1)
+    return x11, y11, x11+w , y11+h
+
+def iou(boxes2,boxes1):
+    #!One way to see if boxes are the same during iterations.
+    #But actually this may be very sensitive to some big objects showing up
+    
+    x11, y11, x12, y12 = get_boxes(boxes1)
+    x21, y21, x22, y22 = get_boxes(boxes2) # from num_of_boxes by 4 matrix we go to 4 vectors.
+    xA = np.maximum(x11, np.transpose(x21)) #transpose is done to make it broadcastable and has this maximum over all boxes!
+    yA = np.maximum(y11, np.transpose(y21))
+    xB = np.minimum(x12, np.transpose(x22))
+    yB = np.minimum(y12, np.transpose(y22))
+    interArea = np.maximum((xB - xA + 1), 0) * np.maximum((yB - yA + 1), 0)
+    boxAArea = (x12 - x11 + 1) * (y12 - y11 + 1)
+    boxBArea = (x22 - x21 + 1) * (y22 - y21 + 1)
+    iou = interArea / (boxAArea + np.transpose(boxBArea) - interArea)
+
+    return np.argwhere(iou > 0.5)
     

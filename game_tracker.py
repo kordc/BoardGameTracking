@@ -26,7 +26,7 @@ class CycladesTracker:
         fg_cv2 = cv2.filter2D(frame[:,:,2].astype(g2.dtype), -1, g2)
 
         filtered = (np.maximum(np.zeros_like(fg_cv), fg_cv + fg_cv2) > 20).sum(axis=0)
-        line_x = np.where(filtered > 300)[0][0]
+        line_x = np.where(filtered > 200)[0][0]
 
         return line_x - 10
 
@@ -176,43 +176,120 @@ class CycladesTracker:
         boxes, correct_boxes = [], []
         for cnt in cnts:
             x,y,w,h = cv2.boundingRect(cnt)
-
-            boxes.append([x,y,w,h]) # Getting coordinates of every new found box
-            # area = cv2.contourArea(cnt)
-            #cv2.rectangle(frame,(x,y),(x+w,y+h),(0,255,0),2)
-            # cv2.putText(frame, str(area), (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            if w*h > 80 and w*h < 12000: #! neglect very small boxes
+                boxes.append([x,y,w,h]) # Getting coordinates of every new found box
+                area = cv2.contourArea(cnt)
+            
+                #cv2.rectangle(frame,(x,y),(x+w,y+h),(0,255,0),2)
+                #cv2.putText(frame, str(area), (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
             # _ = self.classify_objects(x, y, w, h, frame)
         
         if len(boxes) == 0:
             return frame, candidates
+
+        # if w*h > 5000:
+        #     self.mask[y:y+h, x:x+w] = 0
+        #     cv2.rectangle(frame,(x,y),(x+w,y+h),(255,0,0),2)
+        #     cv2.putText(frame, str(w*h), (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
         if not candidates: # if this is first iteration
             candidates = {tuple(box): 1 for box in boxes}
         else:
             old = list(candidates.keys()) #previous candidates
             new = boxes # currently found boxes
-
-            # if w*h > 5000:
-            #                 self.mask[y:y+h, x:x+w] = 0
-            #             if w*h < 50:
-            #                 continue
-            #             cv2.rectangle(frame,(x,y),(x+w,y+h),(255,0,0),2)
-            #             cv2.putText(frame, str(w*h), (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-
             matches = utils.centres_within(np.array(old), np.array(new)) # which box match to whom
             new_candidates = {tuple(box): 1 for box in boxes}
             for match in matches: # Box ith from previous iteration matched to jth from this iteration
                 i,j = match
+                #! some matching by area should be done!
                 new_candidates[tuple(new[i])] = candidates[old[j]] + 1
-                if new_candidates[tuple(new[i])] == 3: # If box was seen twice in the same place we track it
+                #! This equality here may be problematic as sometimes more than one box can be matched potentially!
+                if new_candidates[tuple(new[i])] >= 4: # If box was seen twice in the same place we track it
+                    # area = cv2.contourArea(cnt)
+                    # if area > 100:
+                    #cv2.rectangle(frame,(x,y),(x+w,y+h),(255,0,0),2)
+                    #     cv2.putText(frame, str(area), (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+
+                   
                     correct_boxes.append(new[i])
                     x,y,w,h = new[i]
-                    if self.classify_objects(x, y, w, h, frame):
-                        cv2.rectangle(frame, (x, y), (x+w, y+h),
-                                      (255, 0, 0), 2)
+                    self.classify_left_objects(x, y, w, h, frame)
+                    #if self.classify_objects(x, y, w, h, frame):
+                        #cv2.rectangle(frame, (x, y), (x+w, y+h),
+                         #             (255, 0, 0), 2)
             candidates = new_candidates
         return frame, candidates
 
+    def classify_pawn_by_color(self, x,y,w,h,frame):
+        yellow = utils.segment_by_hsv_color(frame[y:y+h, x:x+w], np.array([20, 130, 130]), np.array([30, 255, 255]))
+        black = utils.segment_by_hsv_color(frame[y:y+h, x:x+w], np.array([0, 0, 0]), np.array([180, 255, 30]))
+        red = utils.segment_by_hsv_color(frame[y:y+h, x:x+w], np.array([0, 100, 100]), np.array([10, 255, 255]))
+        total = w * h * 255
+        if w * h < 400:
+            if yellow.sum() / total > 0.3:
+                return "yellow"
+            if red.sum() / total > 0.4:
+                return "red"
+            if black.sum() / total > 0.4:
+                return "black"
+
+    def classify_gods(self, x,y,w,h,frame):
+        gods_colors = {
+            "athena": [np.array([0,0,180]), np.array([180,50,255])], 
+            "ares": [np.array([0, 50, 100]), np.array([20, 255, 255])], 
+            "poseidon": [np.array([90, 50, 150]), np.array([100, 255, 255])], 
+            "zeus": [np.array([110, 50, 150]), np.array([120, 255, 255])],
+        }
+        ratios = []
+        if w*h > 5000:
+            total = w * h * 255
+            for name, color in gods_colors.items():
+                mask = utils.segment_by_hsv_color(frame[y:y+h, x:x+w], color[0], color[1])
+                cv2.imshow("mask", mask)
+                cv2.waitKey(0)
+                ratios.append(mask.sum() / total)
+
+            max_god = np.argmax(ratios)
+            if ratios[max_god] > 0.1:
+                return list(gods_colors.keys())[max_god]
+    
+    def classify_cards(self, x,y,w,h,frame):
+        if w*h > 1500 and w*h < 3000:
+            return "card"
+                
+
+    def classify_left_objects(self, x, y, w, h, frame):
+        cv2.imshow("to be detected",frame[y:y+h, x:x+w])
+        cv2.waitKey(0)
+        decision = self.classify_pawn_by_color(x,y,w,h,frame)
+        if decision:
+            self.mask[y:y+h, x:x+w] = 0
+            cv2.putText(frame, decision, (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+              
+            cv2.imshow("detection", frame)
+            cv2.waitKey(0)
+
+            if w*h > 5000:
+                self.mask[y:y+h, x:x+w] = 0
+
+        decision = self.classify_gods(x,y,w,h,frame)
+        if decision:
+            self.mask[y:y+h, x:x+w] = 0
+            cv2.putText(frame, decision, (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            
+            cv2.imshow("detection", frame)
+            cv2.waitKey(0)
+
+            if w*h > 5000:
+                self.mask[y:y+h, x:x+w] = 0
+        
+        decision = self.classify_cards(x,y,w,h,frame)
+        if decision:
+            self.mask[y:y+h, x:x+w] = 0
+            cv2.putText(frame, decision, (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            
+            cv2.imshow("detection", frame)
+            cv2.waitKey(0)
 
     def alignImageToFirstFrame(self, im_gray, im_color):
         # Detect ORB features and compute descriptors.
@@ -269,7 +346,7 @@ class CycladesTracker:
         color, self.left_candidates = self.update_interesting_objects(foreground, color, self.left_candidates)
         cv2.imshow("left_color", color)
         cv2.imshow("left_fg", foreground)
-        #cv2.imshow("left_gray", left_gray)
+        cv2.imshow("mask", self.mask*255)
 
     def initialize_first_frame(self, first_frame):
         self.first_frame_color, self.first_frame_gray = self.preprocess_each_frame(first_frame)
@@ -330,7 +407,7 @@ class CycladesTracker:
             ret, frame = video.read()
             
             if ret:
-                current_frame += 15 # 3fps
+                current_frame += 10 # 3fps
                 frame_color, frame_gray = self.preprocess_each_frame(frame)
                 frame_color = self.alignImageToFirstFrame(frame_gray, frame_color) #! I don't know where exactly this should be done so that grayscale images is warped too... to be discussed
                 
@@ -340,12 +417,11 @@ class CycladesTracker:
                 foreground = cv2.morphologyEx(foreground, cv2.MORPH_OPEN, np.ones((7,7), dtype=np.uint8)) * self.mask # To filter defined background we multiply by mask
                 foreground = ((foreground > 200) * 255).astype(np.uint8) # To have only very intense foreground
 
-                #self.analyze_left_part(self.left_part_color, self.left_part_gray)
-
                 foreground_left, foreground_right = self.separate(foreground)
-                
-                self.right_part_color, candidates = self.update_interesting_objects(
-                    foreground_right, self.right_part_color, candidates)
+
+                self.analyze_left_part(self.left_part_color, self.left_part_gray, foreground_left)
+                # self.right_part_color, candidates = self.update_interesting_objects(
+                #     foreground_right, self.right_part_color, candidates)
 
                 #! WE reupdate our first frame if we detect some problems with foreground
                 #! This actually may make things even worse if we do this in wrong moment e.g when we have hand on the screen it became background
@@ -355,21 +431,21 @@ class CycladesTracker:
 
                 #self.right_part = self.draw_circles(self.right_part_color, self.map_circles)
 
-                h = 0
-                self.stats = np.zeros(
-                    self.right_part_color.shape, dtype=np.uint8)
-                self.stats.fill(255)
-                for key, l in self.objects.items():
-                    cv2.putText(self.stats, key + ": " + str(len(l)), (20,
-                                20 + 20 * h), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-                    h += 1
-                cv2.imshow("left", self.left_part_color)
-                cv2.imshow("right", self.right_part_color)
-                cv2.imshow("game look", np.concatenate([self.left_part_color, self.right_part_color], axis=1))
-                cv2.imshow("foreground", foreground)
-                cv2.imshow("empty", self.segmented_right_part)
+                # h = 0
+                # self.stats = np.zeros(
+                #     self.right_part_color.shape, dtype=np.uint8)
+                # self.stats.fill(255)
+                # for key, l in self.objects.items():
+                #     cv2.putText(self.stats, key + ": " + str(len(l)), (20,
+                #                 20 + 20 * h), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                #     h += 1
+                # cv2.imshow("left", self.left_part_color)
+                # cv2.imshow("right", self.right_part_color)
+                # cv2.imshow("game look", np.concatenate([self.left_part_color, self.right_part_color], axis=1))
+                # cv2.imshow("foreground", foreground)
+                # cv2.imshow("empty", self.segmented_right_part)
   
-                cv2.imshow("stats", self.stats)
+                # cv2.imshow("stats", self.stats)
 
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
@@ -379,4 +455,4 @@ class CycladesTracker:
 
 if __name__ == "__main__":
     tracker = CycladesTracker(empty_board_path="data/empty_board.jpg")
-    tracker.run("data/cyklady_lvl1_2.mp4")
+    tracker.run("data/cyklady_lvl2_1.mp4")
