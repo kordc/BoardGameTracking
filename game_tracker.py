@@ -14,7 +14,7 @@ class CycladesTracker:
 
         
         self.create_and_move("stats",0,300)
-        self.create_and_move("foreground",500,500)
+        # self.create_and_move("foreground",500,500)
         self.create_and_move("game look", 500,0)
     def create_and_move(self,name, x,y):
         cv2.namedWindow(name)
@@ -23,12 +23,14 @@ class CycladesTracker:
     def run(self, video_path, starting_frame):
         # At first processing of the first frame
         video, width, height, fps = utils.get_video(video_path)
-
         first_frame = utils.get_one_frame(video, frame_num=starting_frame, current_frame=starting_frame)
-
+        
         right_part_color, right_part_gray = self.board_preparator.initialize(first_frame)
         self.right_part_analyzer.analyze_map(right_part_color, right_part_gray)
 
+        resized = cv2.resize(first_frame, None, fx=0.4, fy=0.4)
+        output = cv2.VideoWriter('results/output_cyklady_lvl3_1.avi', cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'), fps,
+                                 resized.shape[:2][::-1])
         current_frame_num = starting_frame
         while video.isOpened():
             video.set(cv2.CAP_PROP_POS_FRAMES, current_frame_num)
@@ -41,14 +43,20 @@ class CycladesTracker:
                 right_part_color, right_stats = self.right_part_analyzer.process(right_part_color, right_foreground)
 
 
-                cv2.imshow("foreground", np.concatenate([left_foreground, right_foreground], axis=1))
-                cv2.imshow("game look", np.concatenate([left_part_color, right_part_color], axis=1))
+                # cv2.imshow("foreground", np.concatenate([left_foreground, right_foreground], axis=1))
+                game_look = np.concatenate(
+                    [left_part_color, right_part_color], axis=1)
+                cv2.imshow("game look", game_look)
                 cv2.imshow("stats", right_stats)
-               
+                for _ in range(10):
+                    output.write(game_look)
+
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
             else:
                 break
+        output.release()
+        cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
@@ -57,7 +65,7 @@ if __name__ == "__main__":
                             description = 'Program that tracks cyclade board game',
                             epilog = 'have fun!')
 
-    parser.add_argument('-f','--filename', default="data/cyklady_lvl1_1.mp4", help="path to video")
+    parser.add_argument('-f','--filename', default="data/cyklady_lvl3_1.mp4", help="path to video")
     parser.add_argument('-e', "--empty_board_image", default="data/empty_board.jpg", help="path to image of an empty board")
     parser.add_argument('-db','--debug_board', default=False, help = "Set to True if you want to see debug images of the board")
     parser.add_argument('-dl','--debug_left', default=False, help = "Set to True if you want to see debug images of the left side ")
