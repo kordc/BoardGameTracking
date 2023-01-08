@@ -30,7 +30,7 @@ class RightPartAnalyzer():
 
     def label_circles(self, circles, frame):
         # label circles with sea or land
-        self.segmented_right_part = frame.copy()
+        self.segmented_right_part = frame.copy() #get the right part of the board from the frame
         #self.segmented_right_part[:,:,0] = 255
 
         labeled_circles = []
@@ -45,17 +45,17 @@ class RightPartAnalyzer():
 
             place = frame[y1:y2, x1:x2]
 
-            sea_mask = utils.get_sea_mask(place, label_circles=True)
-            land_mask = utils.get_land_mask(place, label_circles=True)
+            sea_mask = utils.get_sea_mask(place, label_circles=True) #get the sea mask from hsv range
+            land_mask = utils.get_land_mask(place, label_circles=True) #get the land mask from hsv range
 
             total = utils.calculate_total(x2-x1, y2-y1)
             sea_ratio = np.sum(sea_mask) / total
             land_ratio = np.sum(land_mask) / total
 
-            if land_ratio > 0.08:
+            if land_ratio > 0.08: #if the land appears anywhere in the circle then it is a land
                 labeled_circles.append((circle, "land"))
                 self.segmented_right_part[y1:y2, x1:x2] = (0, 255, 0)
-            elif sea_ratio > 0.7:
+            elif sea_ratio > 0.7: 
                 labeled_circles.append((circle, "sea"))
                 self.segmented_right_part[y1:y2, x1:x2] = (255, 0, 0)
 
@@ -81,38 +81,40 @@ class RightPartAnalyzer():
         # detect islands on the map
         land_mask = utils.get_land_mask(self.segmented_right_part)
         land_mask = cv2.erode(land_mask, np.ones((3, 3)), iterations=1)
-        land_mask = cv2.dilate(land_mask, np.ones((3, 3)), iterations=6)
+        land_mask = cv2.dilate(land_mask, np.ones((3, 3)), iterations=6) #clean the land mask to get better islands borders
         cnts, hier = cv2.findContours(
-            land_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            land_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE) #find islands contours
         islands = {}
         for cnt in cnts:
-            if cv2.contourArea(cnt) > 10000:
+            if cv2.contourArea(cnt) > 10000: #if the island is too big then skip it
                 continue
-            if cnt.shape[0] > 5:
+            if cnt.shape[0] > 5: #if the shape is a rectangle
                 xr, yr, wr, hr = cv2.boundingRect(cnt)
                 islands[(xr, yr, wr, hr)] = [cnt]
         return islands
 
     def detect_current_island(self, x, y, w, h, frame):
         # detect island on which the object is placed
+        # if the object (x, x+w, y, y+h) is placed on any island (xr, xr+wr, yr, yr+hr)
+        # return the island
         for island in self.islands.keys():
             xr, yr, wr, hr = island
-            if x > xr*0.8 and x+w < (xr+wr)*1.2 and y > yr*0.8 and y+h < (yr+hr)*1.2:
+            if x > xr*0.8 and x+w < (xr+wr)*1.2 and y > yr*0.8 and y+h < (yr+hr)*1.2: 
                 return self.islands[island]
         return None
 
     def object_type(self, x, y, w, h, frame):
         # detect object type
-        sea_mask = utils.get_sea_mask(self.segmented_right_part[y:y+h, x:x+w])
+        sea_mask = utils.get_sea_mask(self.segmented_right_part[y:y+h, x:x+w]) #get the sea mask from hsv range
         land_mask = utils.get_land_mask(
-            self.segmented_right_part[y:y+h, x:x+w])
+            self.segmented_right_part[y:y+h, x:x+w])    #get the land mask from hsv range
 
-        total = utils.calculate_total(w, h)
-        sea_ratio = np.sum(sea_mask) / total
+        total = utils.calculate_total(w, h) 
+        sea_ratio = np.sum(sea_mask) / total 
         land_ratio = np.sum(land_mask) / total
 
         obj_type = "unknown"
-        if land_ratio > sea_ratio and land_ratio > 0.1:
+        if land_ratio > sea_ratio and land_ratio > 0.1: #if the frame has more land and the land appears anywhere in the object then it is a warrior
             obj_type = "warrior"
         elif sea_ratio > land_ratio and sea_ratio > 0.1:
             obj_type = "ship"
@@ -120,7 +122,7 @@ class RightPartAnalyzer():
         return obj_type
 
     def object_color(self, yellow, black, red, blue=None, violet=None, gray=None, orange=None):
-        # detect object color
+        # detect object color - heuristics based on the number of pixels of each color
         if blue is not None and blue.sum() > yellow.sum() and blue.sum() > black.sum() and blue.sum() > red.sum():
             if blue.sum() > violet.sum() and blue.sum() > gray.sum() and blue.sum() > orange.sum():
                 return "blue"
@@ -148,11 +150,11 @@ class RightPartAnalyzer():
             return -1
 
         for i, obj_box in enumerate(self.objects[name]):
-            cutted = utils.cut_obj(frame, obj_box)
+            cutted = utils.cut_obj(frame, obj_box) # get the object frame
             if self.debug:
                 cv2.imshow("moved?", cutted)
-            yellow, black, red = utils.segment_colors(cutted, debug=self.debug)
-            new_color = self.object_color(yellow, black, red)
+            yellow, black, red = utils.segment_colors(cutted, debug=self.debug) #segment the object frame for 3 counters colors
+            new_color = self.object_color(yellow, black, red) #detect the new object's color
             if new_color != color:
                 return i
 
@@ -177,8 +179,9 @@ class RightPartAnalyzer():
 
     def city_island_mapping(self, x, y, w, h, frame):
         # detect on which island is a city
+        # if the city is placed on any island, then assigg the island to the owner of the city
         current_island = self.detect_current_island(x, y, w, h, frame)
-        if current_island is not None:
+        if current_island is not None: # if the city is placed on any island
             xr, yr, wr, hr = cv2.boundingRect(current_island[0])
             if len(self.islands[(xr, yr, wr, hr)]) > 1:
                 owner = self.islands[(xr, yr, wr, hr)][1]
